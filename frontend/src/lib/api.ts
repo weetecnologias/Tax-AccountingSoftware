@@ -77,10 +77,11 @@ export function refreshSession(): Promise<boolean> {
   return refreshInFlight;
 }
 
-type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal; raw?: boolean };
+type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal; raw?: boolean; idempotencyKey?: string };
 
 async function send(path: string, opts: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = { "X-Requested-With": "taxpilot" };
+  if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
   let body: BodyInit | undefined;
   if (opts.body instanceof FormData) {
     body = opts.body;
