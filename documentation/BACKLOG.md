@@ -28,15 +28,23 @@ Legend: **P1** Phase 1 carry-over · **P2** Phase 2 (accounting engine) · later
 - [x] General ledger, trial balance, P&L, balance sheet from posted entries only; CSV export
 - [x] Dashboard: journals awaiting approval / posting, posted this month
 
-## Phase 2B — Accounting engine, remaining
-- [ ] Bank statement import (CSV/XLSX), normalisation, matching engine (exact / tolerance / reference), exception queue, approval
-- [ ] Sales and purchase invoices (with GST lines), vendor and customer masters, sales/purchase registers
+## Phase 2B part 1 — delivered 2026-11-21
+- [x] Organisation letterhead and approval policy (self-approval allowed or not; audited)
+- [x] Customers / vendors; party sub-ledger on journal lines
+- [x] Sales and purchase invoices with GST lines, rate master, RCM, ITC, numbering per GSTIN, duplicate detection
+- [x] Bank statement import (CSV/XLS/XLSX; HDFC, ICICI, SBI, Axis, Kotak, generic), overlap protection,
+      exact auto-matching, suggestions, manual match / exclude, draft journals, reconciliation statement, sign-off, discard
+
+## Phase 2B part 2 — next
 - [ ] Cash book and bank book views; cash flow statement (indirect method)
 - [ ] Recurring journals; year-end close (transfer P&L to retained earnings, carry forward balances)
 - [ ] Comparison with previous period / budget; monthly, quarterly, half-yearly presets
-- [ ] Configurable maker-checker thresholds (e.g. low-value auto-approval rules), generic workflow + approvals tables
-- [ ] PDF / Excel exports with report metadata (prepared by, reviewed by, version)
-- [ ] Redis + background job runner with retries and dead-letter (for statement imports)
+- [ ] PDF / Excel exports using the letterhead (prepared by, reviewed by, version)
+- [ ] Credit / debit notes against posted invoices; sales and purchase registers; receivable / payable ageing
+- [ ] Printable tax invoice (PDF) for sales invoices
+- [ ] Tax-expert review workflow for the GST rate master (slabs currently `PENDING_REVIEW`)
+- [ ] Bank import column-mapping screen for layouts the header detection cannot recognise; PDF statements
+- [ ] Redis + background job runner with retries and dead-letter (large statement imports)
 - [ ] Per-entity chart templates (individual, firm, company) and template versioning UI
 
 ## Phase 3 — GST
