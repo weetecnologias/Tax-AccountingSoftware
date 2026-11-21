@@ -10,10 +10,13 @@ export default defineConfig({
     alias: { "@": path.resolve(import.meta.dirname, "src") },
   },
   server: {
+    // Bind to IPv4 loopback: "localhost" alone may bind only to ::1, which some browsers never try.
+    host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    open: !process.env.CI && !process.env.CLAUDE_PREVIEW,
     proxy: {
-      "/api": { target: "http://localhost:8080", changeOrigin: false },
+      "/api": { target: "http://127.0.0.1:8080", changeOrigin: false },
     },
   },
   test: {

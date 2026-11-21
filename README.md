@@ -30,9 +30,11 @@ Prerequisites: JDK 21+ (25 works), Maven 3.9+, Node 22+, Docker Desktop.
 4. Start the web app in a second terminal (http://localhost:5173):
    ```
    cd frontend
-   npm install
-   npm run dev
+   npm.cmd install
+   npm.cmd run dev
    ```
+   Your browser opens automatically. On Windows, use `npm.cmd` in PowerShell: plain `npm` is blocked when
+   script execution is disabled ("running scripts is disabled on this system").
 5. Sign in with `TAXPILOT_ADMIN_EMAIL` / `TAXPILOT_ADMIN_PASSWORD` from `.env`. You will be asked to change the
    password at first sign-in.
 
