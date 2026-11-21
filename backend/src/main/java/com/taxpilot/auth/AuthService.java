@@ -118,7 +118,8 @@ public class AuthService {
         if (session.getRevokedAt() != null) {
             // A rotated-out token was replayed: treat as theft and end every session for the user.
             sessions.revokeAllForUser(session.getUserId(), now);
-            audit.recordAs(session.getUserId(), null, "REFRESH_TOKEN_REUSE", "USER", session.getUserId(), null, null);
+            audit.recordAs(session.getUserId(),
+                    users.findById(session.getUserId()).map(User::getEmail).orElse(null), "REFRESH_TOKEN_REUSE", "USER", session.getUserId(), null, null);
             return AuthResult.failed("Session ended");
         }
         if (!session.isUsable(now)) {
@@ -140,7 +141,8 @@ public class AuthService {
         }
         sessions.findByRefreshTokenHash(BlindIndex.sha256Hex(refreshToken)).ifPresent(s -> {
             s.revoke();
-            audit.recordAs(s.getUserId(), null, "LOGOUT", "USER", s.getUserId(), null, null);
+            String email = users.findById(s.getUserId()).map(User::getEmail).orElse(null);
+            audit.recordAs(s.getUserId(), email, "LOGOUT", "USER", s.getUserId(), null, null);
         });
     }
 

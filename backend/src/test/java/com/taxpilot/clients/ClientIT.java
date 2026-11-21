@@ -25,6 +25,7 @@ class ClientIT extends ApiTestSupport {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("DRAFT"))
                 .andExpect(jsonPath("$.clientCode").exists())
+                .andExpect(jsonPath("$.createdAt").isNotEmpty())
                 .andReturn();
         return read(r).get("id").asString();
     }

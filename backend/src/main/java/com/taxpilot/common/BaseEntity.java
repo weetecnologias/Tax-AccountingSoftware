@@ -3,19 +3,41 @@ package com.taxpilot.common;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.springframework.data.domain.Persistable;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Transient;
 
-/** UUID id assigned in Java plus created/updated timestamps. */
+/**
+ * UUID id assigned in Java plus created/updated timestamps.
+ * Implements Persistable so Spring Data calls persist() (not merge()) for new rows despite the pre-set id.
+ */
 @MappedSuperclass
-public abstract class BaseEntity {
+public abstract class BaseEntity implements Persistable<UUID> {
 
     @Id
     @Column(nullable = false, updatable = false)
     protected UUID id = UUID.randomUUID();
+
+    @Transient
+    private boolean isNew = true;
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
+
+    @PostLoad
+    @PostPersist
+    void markNotNew() {
+        isNew = false;
+    }
 
     @Column(name = "created_at", nullable = false, updatable = false)
     protected Instant createdAt;
@@ -35,6 +57,7 @@ public abstract class BaseEntity {
         updatedAt = Instant.now();
     }
 
+    @Override
     public UUID getId() {
         return id;
     }
