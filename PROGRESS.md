@@ -68,4 +68,42 @@ Documents, Audit log, Settings (Users, Roles & permissions).
 
 **Run locally** — see README.md.
 
-### Next: Phase 2 (accounting engine) — see `documentation/BACKLOG.md`.
+## 2026-11-21 — Session 1 (continued): Phase 2A accounting engine (branch `feature`)
+
+**Implemented features**
+- Chart of accounts per client: groups/ledgers, parent-child, codes, subtypes; standard Indian template
+  (`IN-STANDARD` v1, Schedule III headings, GST input/output/RCM ledgers) applied in one step.
+- Financial years as twelve monthly periods from the client's FY start month; period close (blocked while journals
+  await approval/posting) and reopen with a mandatory, audited reason.
+- Journals: draft → submit → approve → post, reject back to draft, cancel. Preparer/submitter can never approve or
+  post. Gap-free voucher numbers `JV/<FY>/<00001>`. `Idempotency-Key` on create. Reversals are drafts with
+  swapped sides that go through the same approval path and link both entries.
+- Database triggers: posted entries and lines immutable; posting requires balanced lines on active ledger accounts
+  of the client in an open period. Journals require an ACTIVE client.
+- Reports from posted entries only: general ledger (opening, running, closing), trial balance, profit and loss,
+  balance sheet (with "profit for the period" and a balance check). CSV export for each.
+- Web app: Accounting workspace (guided setup, 7 tabs), journal editor with exact BigInt paise totals and live
+  balance indicator, journal view with approval trail; dashboard journal metrics; "Books" button on client profile.
+
+**Migrations** — V6 accounting tables + triggers · V7 permissions `ACCOUNTING_READ/WRITE/APPROVE`
+(ADMIN, PARTNER: all; ACCOUNTANT: read+write; VIEWER: read).
+
+**API** — `documentation/api/API-Phase2-Accounting.md`. **ERD** — updated in `documentation/database/ERD.md`.
+
+**Tests**
+| Suite | Count | Result |
+|---|---|---|
+| Backend unit (incl. money, FY parsing, template well-formedness, journal totals) | 27 | pass |
+| Backend integration (incl. 10 accounting scenarios: lifecycle, idempotency, maker-checker, invalid lines, DB immutability, hand-computed TB/P&L/BS/GL, reversal, period close/reopen, inactive client, viewer rights) | 30 | pass |
+| Frontend unit (incl. paise arithmetic, Indian formatting) | 12 | pass |
+| Production build | — | pass |
+| Browser end-to-end: setup books → partner prepares capital journal (₹0.01 imbalance shown, then fixed) → submit → admin approves and posts `JV/2026-27/00001` → two more journals → trial balance ₹7,36,000 both sides, P&L profit ₹1,55,000, balance sheet ₹6,91,000 balanced — all matching hand calculation | — | pass |
+
+**Defects found and fixed** — chart template failed to load under Jackson 3 (missing booleans are rejected);
+"Draft journal" title shown for pending entries. Dev server lost its config when a branch switch briefly removed the
+frontend folder; docs are now edited in a separate git worktree.
+
+**Known limitations** — no bank reconciliation, invoices, cash flow, year-end close or PDF export yet (Phase 2B);
+every journal needs approval (no threshold rules yet); one chart template for all entity types.
+
+### Next: Phase 2B — see `documentation/BACKLOG.md`.
