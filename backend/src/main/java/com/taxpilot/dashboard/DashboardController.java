@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.taxpilot.accounting.AccountingRepositories.JournalRepository;
+import com.taxpilot.accounting.JournalEntry;
 import com.taxpilot.audit.AuditLogRepository;
 import com.taxpilot.audit.AuditService;
 import com.taxpilot.clients.ClientRepositories.ClientRepository;
@@ -33,13 +35,15 @@ public class DashboardController {
     private final DocumentRepository documents;
     private final AuditLogRepository auditLogs;
     private final AuditService audit;
+    private final JournalRepository journals;
 
     public DashboardController(ClientRepository clients, DocumentRepository documents, AuditLogRepository auditLogs,
-                               AuditService audit) {
+                               AuditService audit, JournalRepository journals) {
         this.clients = clients;
         this.documents = documents;
         this.auditLogs = auditLogs;
         this.audit = audit;
+        this.journals = journals;
     }
 
     public record DayCount(LocalDate day, long count) {
@@ -49,7 +53,8 @@ public class DashboardController {
                           long clientsWithoutAccountant, Map<String, Long> clientsByStatus, long totalDocuments,
                           long documentsAwaitingReview, long suspectedDuplicates, long documentsUploadedToday,
                           Map<String, Long> documentsByStatus, List<DayCount> uploadsLast14Days,
-                          List<AuditService.AuditEntryDto> recentActivity) {
+                          List<AuditService.AuditEntryDto> recentActivity, long journalsAwaitingApproval,
+                          long journalsAwaitingPosting, long journalsPostedThisMonth) {
     }
 
     @GetMapping("/summary")
@@ -87,6 +92,10 @@ public class DashboardController {
         return new Summary(Instant.now(), totalClients, byStatus.get("ACTIVE"), byStatus.get("READY_FOR_APPROVAL"),
                 clients.countOpenWithoutAccountant(), byStatus, totalDocs,
                 documents.countByStatusIn(Document.Status.AWAITING_REVIEW), docsByStatus.get("DUPLICATE_SUSPECTED"),
-                documents.countByUploadedAtGreaterThanEqual(startOfToday), docsByStatus, uploads, recent);
+                documents.countByUploadedAtGreaterThanEqual(startOfToday), docsByStatus, uploads, recent,
+                journals.countByStatus(JournalEntry.Status.PENDING_APPROVAL),
+                journals.countByStatus(JournalEntry.Status.APPROVED),
+                journals.countByStatusAndPostedAtGreaterThanEqual(JournalEntry.Status.POSTED,
+                        today.withDayOfMonth(1).atStartOfDay(IST).toInstant()));
     }
 }
