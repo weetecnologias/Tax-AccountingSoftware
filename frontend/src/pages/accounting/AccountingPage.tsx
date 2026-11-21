@@ -9,7 +9,10 @@ import { useAccounts, useClientOptions, usePeriods } from "@/hooks/useAccounting
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { ClientDetail } from "@/types/api";
+import { BankTab } from "./BankTab";
 import { ChartTab } from "./ChartTab";
+import { InvoicesTab } from "./InvoicesTab";
+import { PartiesTab } from "./PartiesTab";
 import { JournalsTab } from "./JournalsTab";
 import { PeriodsTab } from "./PeriodsTab";
 import { BalanceSheetTab, LedgerTab, ProfitLossTab, TrialBalanceTab } from "./ReportTabs";
@@ -89,6 +92,9 @@ export function AccountingPage() {
         <Tabs value={tab} onValueChange={(v) => setParam("tab", v)}>
           <TabsList aria-label="Accounting sections">
             <TabsTrigger value="journals">Journals</TabsTrigger>
+            <TabsTrigger value="invoices">Invoices</TabsTrigger>
+            <TabsTrigger value="parties">Customers &amp; vendors</TabsTrigger>
+            <TabsTrigger value="bank">Bank reconciliation</TabsTrigger>
             <TabsTrigger value="trial-balance">Trial balance</TabsTrigger>
             <TabsTrigger value="profit-loss">Profit &amp; loss</TabsTrigger>
             <TabsTrigger value="balance-sheet">Balance sheet</TabsTrigger>
@@ -97,6 +103,9 @@ export function AccountingPage() {
             <TabsTrigger value="periods">Periods</TabsTrigger>
           </TabsList>
           <TabsContent value="journals" className="mt-5"><JournalsTab clientId={clientId} active={client.data?.status === "ACTIVE"} /></TabsContent>
+          <TabsContent value="invoices" className="mt-5"><InvoicesTab clientId={clientId} active={client.data?.status === "ACTIVE"} /></TabsContent>
+          <TabsContent value="parties" className="mt-5"><PartiesTab clientId={clientId} closed={client.data?.status === "CLOSED"} /></TabsContent>
+          <TabsContent value="bank" className="mt-5"><BankTab clientId={clientId} closed={client.data?.status === "CLOSED"} /></TabsContent>
           <TabsContent value="trial-balance" className="mt-5"><TrialBalanceTab clientId={clientId} /></TabsContent>
           <TabsContent value="profit-loss" className="mt-5"><ProfitLossTab clientId={clientId} /></TabsContent>
           <TabsContent value="balance-sheet" className="mt-5"><BalanceSheetTab clientId={clientId} /></TabsContent>

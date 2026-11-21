@@ -29,6 +29,7 @@ import com.taxpilot.clients.ClientStatus;
 import com.taxpilot.common.ApiException;
 import com.taxpilot.common.PageResponse;
 import com.taxpilot.security.CurrentUser;
+import com.taxpilot.settings.SettingsService;
 import com.taxpilot.users.UserDtos.UserRef;
 import com.taxpilot.users.UserRepository;
 
@@ -50,9 +51,11 @@ public class JournalService {
     private final UserRepository users;
     private final AuditService audit;
     private final JdbcTemplate jdbc;
+    private final SettingsService settings;
 
     public JournalService(JournalRepository journals, LedgerAccountRepository accounts, PeriodService periods,
-                          ClientService clients, UserRepository users, AuditService audit, JdbcTemplate jdbc) {
+                          ClientService clients, UserRepository users, AuditService audit, JdbcTemplate jdbc,
+                          SettingsService settings) {
         this.journals = journals;
         this.accounts = accounts;
         this.periods = periods;
@@ -60,6 +63,7 @@ public class JournalService {
         this.users = users;
         this.audit = audit;
         this.jdbc = jdbc;
+        this.settings = settings;
     }
 
     /** Result of a create call: whether the entry was newly created or returned for a repeated idempotency key. */
@@ -159,10 +163,11 @@ public class JournalService {
         CurrentUser me = CurrentUser.require();
         JournalEntry entry = find(id);
         requireStatus(entry, JournalEntry.Status.PENDING_APPROVAL, "Only journals awaiting approval can be approved");
-        requireChecker(me, entry, "approve");
+        boolean self = requireChecker(me, entry, "approve");
         entry.approve(me.id(), blank(comment));
         journals.save(entry);
         Map<String, Object> d = summary(entry);
+        if (self) d.put("selfApproved", true);
         if (blank(comment) != null) d.put("comment", comment.trim());
         audit.record("JOURNAL_APPROVED", "JOURNAL_ENTRY", id, entry.getClientId(), d);
         return toDetail(entry);
@@ -194,7 +199,7 @@ public class JournalService {
             return toDetail(entry); // idempotent: a repeated post is a no-op
         }
         requireStatus(entry, JournalEntry.Status.APPROVED, "Only approved journals can be posted");
-        requireChecker(me, entry, "post");
+        boolean self = requireChecker(me, entry, "post");
         requireActiveClient(entry.getClientId());
         AccountingPeriod period = requireOpenPeriod(entry);
         if (!entry.isBalanced()) {
@@ -213,7 +218,9 @@ public class JournalService {
             original.markReversedBy(entry.getId());
             journals.save(original);
         }
-        audit.record("JOURNAL_POSTED", "JOURNAL_ENTRY", id, entry.getClientId(), summary(entry));
+        Map<String, Object> posted = summary(entry);
+        if (self) posted.put("selfApproved", true);
+        audit.record("JOURNAL_POSTED", "JOURNAL_ENTRY", id, entry.getClientId(), posted);
         return toDetail(entry);
     }
 
@@ -267,6 +274,46 @@ public class JournalService {
         return toDetail(rev);
     }
 
+    /**
+     * Records an already-approved source document (e.g. an invoice approved under maker-checker) as a posted
+     * journal in one transaction. The database triggers still enforce balance, open period and account rules.
+     */
+    @Transactional
+    public JournalEntry createPosted(UUID clientId, LocalDate date, String narration, String reference,
+                                     List<JournalEntry.Line> lines, UUID preparedBy, UUID submittedBy,
+                                     UUID approvedBy, String sourceAction) {
+        requireActiveClient(clientId);
+        AccountingPeriod period = periods.periodFor(clientId, date, "invoiceDate");
+        if (period.getStatus() != AccountingPeriod.Status.OPEN) {
+            throw ApiException.conflict("PERIOD_CLOSED", "The accounting period for " + date + " is closed");
+        }
+        for (JournalEntry.Line l : lines) {
+            LedgerAccount a = accounts.findById(l.getAccountId())
+                    .filter(acc -> acc.getClientId().equals(clientId))
+                    .orElseThrow(() -> ApiException.badRequest("ACCOUNT_MISSING", "A required ledger account is missing"));
+            if (a.isGroup() || !a.isActive()) {
+                throw ApiException.conflict("ACCOUNT_UNAVAILABLE", "Account " + a.getCode() + " is inactive or a group");
+            }
+        }
+        JournalEntry entry = new JournalEntry(clientId, preparedBy, JournalEntry.Type.GENERAL, null, null);
+        entry.setEntryDate(date, period.getId());
+        entry.setNarration(truncate(narration, 1000));
+        entry.setReference(reference);
+        entry.replaceLines(lines);
+        if (!entry.isBalanced()) {
+            throw new IllegalStateException("System-generated journal is not balanced");
+        }
+        entry.submit(submittedBy);
+        entry.approve(approvedBy, null);
+        journals.saveAndFlush(entry);
+        entry.post(approvedBy, nextNumber(clientId, period.getFinancialYear()));
+        journals.saveAndFlush(entry);
+        Map<String, Object> d = summary(entry);
+        d.put("source", sourceAction);
+        audit.record("JOURNAL_POSTED", "JOURNAL_ENTRY", entry.getId(), clientId, d);
+        return entry;
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void apply(JournalEntry entry, JournalRequest req) {
@@ -317,14 +364,12 @@ public class JournalService {
         return "JV/" + financialYear + "/" + String.format("%05d", n);
     }
 
-    private void requireChecker(CurrentUser me, JournalEntry entry, String verb) {
+    /** Returns true when the action is a self-approval permitted by the organisation's policy. */
+    private boolean requireChecker(CurrentUser me, JournalEntry entry, String verb) {
         if (!me.has(APPROVE)) {
             throw ApiException.forbidden("FORBIDDEN", "Only an approver can " + verb + " journals");
         }
-        if (me.id().equals(entry.getPreparedBy()) || me.id().equals(entry.getSubmittedBy())) {
-            throw ApiException.forbidden("MAKER_CHECKER",
-                    "You prepared or submitted this journal, so a different user must " + verb + " it");
-        }
+        return settings.checkApprover(me.id(), verb, entry.getPreparedBy(), entry.getSubmittedBy()).selfApproval();
     }
 
     private void requireActiveClient(UUID clientId) {
@@ -398,7 +443,8 @@ public class JournalService {
         CurrentUser me = CurrentUser.orNull();
         List<String> actions = new ArrayList<>();
         if (me == null) return actions;
-        boolean checker = me.has(APPROVE) && !me.id().equals(e.getPreparedBy()) && !me.id().equals(e.getSubmittedBy());
+        boolean maker = me.id().equals(e.getPreparedBy()) || me.id().equals(e.getSubmittedBy());
+        boolean checker = me.has(APPROVE) && (!maker || settings.allowSelfApproval());
         switch (e.getStatus()) {
             case DRAFT -> {
                 if (me.has(WRITE)) {

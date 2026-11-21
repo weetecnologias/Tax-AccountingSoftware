@@ -24,12 +24,17 @@ function ReportFrame({ header, title, controls, onExport, children }: {
       </div>
       {header && (
         <div className="border-b border-line px-5 py-3 text-center">
+          <p className="text-[11px] tracking-wide text-muted uppercase">
+            Prepared by {header.preparedBy.name}{header.preparedBy.address ? ` · ${header.preparedBy.address}` : ""}
+            {header.preparedBy.gstin ? ` · GSTIN ${header.preparedBy.gstin}` : ""}
+          </p>
           <p className="font-semibold text-primary">{header.clientName} <span className="font-mono text-xs text-muted">{header.clientCode}</span></p>
           <p className="text-sm">{title} {header.from ? `for ${formatDate(header.from)} to ${formatDate(header.to)}` : `as at ${formatDate(header.to)}`}</p>
           <p className="text-xs text-muted">{header.basis} · generated {formatDateTime(header.generatedAt)} · amounts in ₹</p>
         </div>
       )}
       {children}
+      {header?.preparedBy.footer && <p className="border-t border-line px-5 py-2 text-center text-[11px] text-muted">{header.preparedBy.footer}</p>}
     </Card>
   );
 }

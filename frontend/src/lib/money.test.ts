@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatINR, isValidAmount, paiseToString, toPaise } from "./money";
+import { formatINR, gstLinePreview, isValidAmount, paiseToString, toPaise } from "./money";
 
 describe("money", () => {
   it("parses to exact paise", () => {
@@ -24,6 +24,18 @@ describe("money", () => {
     expect(formatINR("999.5")).toBe("999.50");
     expect(formatINR("-4500.00")).toBe("-4,500.00");
     expect(formatINR("0.00", { blankZero: true })).toBe("");
+  });
+
+  it("previews GST exactly like the server", () => {
+    const intra = gstLinePreview("10", "1000", "18", false)!;
+    expect(paiseToString(intra.taxable)).toBe("10000.00");
+    expect(paiseToString(intra.cgst)).toBe("900.00");
+    expect(paiseToString(intra.total)).toBe("11800.00");
+    const rounding = gstLinePreview("3", "33.33", "18", false)!;
+    expect(paiseToString(rounding.taxable)).toBe("99.99");
+    expect(paiseToString(rounding.cgst)).toBe("9.00");
+    expect(paiseToString(gstLinePreview("2.5", "10.01", "0", false)!.taxable)).toBe("25.03");
+    expect(paiseToString(gstLinePreview("4", "2500", "5", true)!.igst)).toBe("500.00");
   });
 
   it("validates amount input", () => {

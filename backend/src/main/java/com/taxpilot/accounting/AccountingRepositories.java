@@ -21,6 +21,8 @@ public final class AccountingRepositories {
 
         Optional<LedgerAccount> findByClientIdAndCode(UUID clientId, String code);
 
+        Optional<LedgerAccount> findByClientIdAndTemplateCode(UUID clientId, String templateCode);
+
         boolean existsByClientId(UUID clientId);
 
         long countByParentId(UUID parentId);

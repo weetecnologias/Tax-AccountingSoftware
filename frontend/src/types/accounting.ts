@@ -98,6 +98,16 @@ export type JournalDetail = {
   version: number;
 };
 
+export type Letterhead = {
+  name: string;
+  tagline: string | null;
+  address: string | null;
+  gstin: string | null;
+  pan: string | null;
+  contact: string | null;
+  footer: string | null;
+};
+
 export type ReportHeader = {
   clientId: string;
   clientCode: string;
@@ -106,6 +116,177 @@ export type ReportHeader = {
   to: string;
   generatedAt: string;
   basis: string;
+  preparedBy: Letterhead;
+};
+
+export type OrganisationSettings = {
+  displayName: string;
+  legalName: string | null;
+  tagline: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  stateCode: string | null;
+  stateName: string | null;
+  pincode: string | null;
+  gstin: string | null;
+  pan: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  reportFooter: string | null;
+  allowSelfApproval: boolean;
+  updatedAt: string;
+  version: number;
+};
+
+export type PartyType = "CUSTOMER" | "VENDOR" | "BOTH";
+export type Party = {
+  id: string;
+  partyType: PartyType;
+  name: string;
+  gstin: string | null;
+  pan: string | null;
+  stateCode: string | null;
+  stateName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  creditDays: number;
+  active: boolean;
+  version: number;
+};
+
+export type InvoiceType = "SALES" | "PURCHASE";
+export type InvoiceStatus = "DRAFT" | "PENDING_APPROVAL" | "POSTED" | "CANCELLED";
+export type InvoiceLine = {
+  id: string;
+  lineNo: number;
+  description: string;
+  hsnSac: string | null;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  quantity: string;
+  unitPrice: string;
+  taxableValue: string;
+  gstRate: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+};
+export type Invoice = {
+  id: string;
+  clientId: string;
+  invoiceType: InvoiceType;
+  status: InvoiceStatus;
+  invoiceNumber: string | null;
+  supplierInvoiceNumber: string | null;
+  invoiceDate: string;
+  dueDate: string | null;
+  partyId: string;
+  partyName: string | null;
+  partyGstin: string | null;
+  gstRegistrationId: string | null;
+  gstin: string | null;
+  placeOfSupply: string;
+  placeOfSupplyName: string | null;
+  supplyType: "INTRA" | "INTER";
+  reverseCharge: boolean;
+  taxableTotal: string;
+  cgstTotal: string;
+  sgstTotal: string;
+  igstTotal: string;
+  grandTotal: string;
+  notes: string | null;
+  journalEntryId: string | null;
+  journalNumber: string | null;
+  preparedBy: UserRef | null;
+  submittedBy: UserRef | null;
+  submittedAt: string | null;
+  approvedBy: UserRef | null;
+  approvedAt: string | null;
+  selfApproved: boolean;
+  rejectionReason: string | null;
+  lines: InvoiceLine[];
+  allowedActions: ("EDIT" | "SUBMIT" | "CANCEL" | "APPROVE" | "REJECT")[];
+  createdAt: string;
+  version: number;
+};
+export type GstRate = { rate: string; description: string; reviewStatus: string };
+export type InvoiceSeries = { id: string; gstRegistrationId: string | null; gstin: string | null; prefix: string; nextNumberPreview: string };
+
+export type BankImport = {
+  id: string;
+  clientId: string;
+  ledgerAccountId: string;
+  ledgerAccountName: string | null;
+  bankFormat: string;
+  originalFilename: string;
+  periodFrom: string;
+  periodTo: string;
+  openingBalance: string | null;
+  closingBalance: string | null;
+  totalDeposits: string;
+  totalWithdrawals: string;
+  lineCount: number;
+  duplicateCount: number;
+  matched: number;
+  unmatched: number;
+  excluded: number;
+  status: "IN_PROGRESS" | "RECONCILED";
+  importedBy: UserRef | null;
+  importedAt: string;
+  approvedBy: UserRef | null;
+  approvedAt: string | null;
+  approvalComment: string | null;
+  selfApproved: boolean;
+  canApprove: boolean;
+  warnings: string[];
+};
+export type MatchedLine = { lineId: string; journalId: string; entryNumber: string; entryDate: string; narration: string; amount: string };
+export type BankTxn = {
+  id: string;
+  rowNo: number;
+  txnDate: string;
+  valueDate: string | null;
+  description: string;
+  reference: string | null;
+  withdrawal: string;
+  deposit: string;
+  balance: string | null;
+  categoryHint: string | null;
+  status: "UNMATCHED" | "MATCHED" | "EXCLUDED";
+  matchType: string | null;
+  matchConfidence: number | null;
+  matchedLine: MatchedLine | null;
+  exclusionReason: string | null;
+};
+export type MatchSuggestion = {
+  lineId: string;
+  journalId: string;
+  entryNumber: string;
+  entryDate: string;
+  narration: string;
+  reference: string | null;
+  amount: string;
+  matchType: "PROBABLE" | "PARTIAL";
+  confidence: number;
+  evidence: string[];
+};
+export type ReconSummary = {
+  importId: string;
+  asOf: string;
+  balancePerBank: string | null;
+  balancePerBooks: string;
+  bankOnlyDeposits: string;
+  bankOnlyWithdrawals: string;
+  bookOnlyDebits: string;
+  bookOnlyCredits: string;
+  adjustedBookBalance: string;
+  difference: string | null;
+  reconciled: boolean;
+  bookOnlyEntries: MatchedLine[];
 };
 
 export type TrialBalance = {

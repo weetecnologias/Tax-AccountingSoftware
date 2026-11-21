@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.taxpilot.clients.Client;
 import com.taxpilot.clients.ClientService;
 import com.taxpilot.common.ApiException;
+import com.taxpilot.settings.SettingsService;
 
 /**
  * Deterministic financial statements computed in SQL (NUMERIC) from POSTED journal lines only.
@@ -28,15 +29,18 @@ public class FinancialReportService {
     private final JdbcTemplate jdbc;
     private final ClientService clients;
     private final ChartOfAccountsService accounts;
+    private final SettingsService settings;
 
-    public FinancialReportService(JdbcTemplate jdbc, ClientService clients, ChartOfAccountsService accounts) {
+    public FinancialReportService(JdbcTemplate jdbc, ClientService clients, ChartOfAccountsService accounts,
+                                  SettingsService settings) {
         this.jdbc = jdbc;
         this.clients = clients;
         this.accounts = accounts;
+        this.settings = settings;
     }
 
     public record ReportHeader(UUID clientId, String clientCode, String clientName, LocalDate from, LocalDate to,
-                               Instant generatedAt, String basis) {
+                               Instant generatedAt, String basis, SettingsService.Letterhead preparedBy) {
     }
 
     // ---------------------------------------------------------------- trial balance
@@ -225,7 +229,7 @@ public class FinancialReportService {
         }
         Client c = clients.find(clientId);
         return new ReportHeader(clientId, c.getClientCode(), c.getDisplayName(), from, to, Instant.now(),
-                "Posted journal entries only");
+                "Posted journal entries only", settings.letterhead());
     }
 
     private static String side(BigDecimal net) {
