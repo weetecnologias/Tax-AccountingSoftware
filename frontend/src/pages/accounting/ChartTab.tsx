@@ -12,7 +12,7 @@ import { useAuth } from "@/lib/auth";
 import { downloadCsv } from "@/lib/csv";
 import { applyServerErrors, nullIfBlank } from "@/lib/forms";
 import { cn, humanize } from "@/lib/utils";
-import { ACCOUNT_TYPES, type Account } from "@/types/accounting";
+import { ACCOUNT_TYPES, CASH_FLOW_CATEGORIES, type Account } from "@/types/accounting";
 
 /** Orders accounts as a tree (parents before children) and records each one's depth. */
 function asTree(accounts: Account[]): { account: Account; depth: number }[] {
@@ -69,6 +69,9 @@ export function ChartTab({ clientId, closed }: { clientId: string; closed: boole
   );
 }
 
+/** Fixed fields stay in the form values (a disabled field would be dropped on submit). */
+const LOCK = { tabIndex: -1, "aria-readonly": true, className: "pointer-events-none bg-page text-muted" } as const;
+
 const schema = z.object({
   code: z.string().trim().regex(/^[A-Za-z0-9.-]{1,20}$/, "Up to 20 letters, digits, . or -"),
   name: z.string().trim().min(1, "Required").max(150),
@@ -78,6 +81,7 @@ const schema = z.object({
   active: z.boolean(),
   subtype: z.string().max(30),
   description: z.string().max(500),
+  cashFlowCategory: z.string(),
 });
 type Values = z.infer<typeof schema>;
 
@@ -88,16 +92,19 @@ function AccountDialog({ clientId, accounts, existing, onClose }: { clientId: st
     defaultValues: {
       code: existing?.code ?? "", name: existing?.name ?? "", accountType: existing?.accountType ?? "EXPENSE",
       parentId: existing?.parentId ?? "", group: existing?.group ?? false, active: existing?.active ?? true,
-      subtype: existing?.subtype ?? "", description: existing?.description ?? "",
+      subtype: existing?.subtype ?? "", description: existing?.description ?? "", cashFlowCategory: existing?.cashFlowCategory ?? "",
     },
   });
   const e = formState.errors;
   const type = watch("accountType");
+  const isGroup = watch("group");
+  const balanceSheet = type === "ASSET" || type === "LIABILITY" || type === "EQUITY";
   const parents = accounts.filter((a) => a.group && a.accountType === type && a.id !== existing?.id);
   const save = useMutation({
     mutationFn: (v: Values) => {
       const body = { ...v, clientId, parentId: nullIfBlank(v.parentId), subtype: nullIfBlank(v.subtype),
-        description: nullIfBlank(v.description), version: existing?.version };
+        description: nullIfBlank(v.description), cashFlowCategory: balanceSheet && !v.group ? nullIfBlank(v.cashFlowCategory) : null,
+        version: existing?.version };
       return existing ? api.put(`/accounting/accounts/${existing.id}`, body) : api.post("/accounting/accounts", body);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["accounting", clientId, "accounts"] }); toast.success("Account saved"); onClose(); },
@@ -112,7 +119,7 @@ function AccountDialog({ clientId, accounts, existing, onClose }: { clientId: st
         <Field label="Code" htmlFor="ac-code" required error={e.code?.message}><Input id="ac-code" className="font-mono uppercase" {...register("code")} aria-invalid={!!e.code} /></Field>
         <Field label="Name" htmlFor="ac-name" required error={e.name?.message}><Input id="ac-name" {...register("name")} aria-invalid={!!e.name} /></Field>
         <Field label="Type" htmlFor="ac-type" required>
-          <Select id="ac-type" disabled={locked} {...register("accountType")}>{ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}</Select>
+          <Select id="ac-type" {...(locked ? LOCK : {})} {...register("accountType")}>{ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{humanize(t)}</option>)}</Select>
         </Field>
         <Field label="Parent group" htmlFor="ac-parent" error={e.parentId?.message}>
           <Select id="ac-parent" {...register("parentId")} aria-invalid={!!e.parentId}>
@@ -122,7 +129,15 @@ function AccountDialog({ clientId, accounts, existing, onClose }: { clientId: st
         </Field>
         <Field label="Subtype" htmlFor="ac-subtype" hint="Optional tag, e.g. BANK, CASH, GST_INPUT"><Input id="ac-subtype" className="uppercase" {...register("subtype")} /></Field>
         <Field label="Description" htmlFor="ac-desc"><Input id="ac-desc" {...register("description")} /></Field>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={locked} {...register("group")} className="h-4 w-4 accent-emerald" /> Group (holds other accounts, cannot be posted to)</label>
+        {balanceSheet && !isGroup && (
+          <Field label="Cash flow category" htmlFor="ac-cf" hint="Where movements on this ledger appear in the cash flow statement" className="sm:col-span-2">
+            <Select id="ac-cf" {...register("cashFlowCategory")}>
+              <option value="">Automatic (from type and subtype)</option>
+              {CASH_FLOW_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </Select>
+          </Field>
+        )}
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register("group")} {...(locked ? { tabIndex: -1, "aria-readonly": true, onClick: (ev: React.MouseEvent) => ev.preventDefault() } : {})} className={locked ? "pointer-events-none h-4 w-4 opacity-60 accent-emerald" : "h-4 w-4 accent-emerald"} /> Group (holds other accounts, cannot be posted to)</label>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" {...register("active")} className="h-4 w-4 accent-emerald" /> Active</label>
       </form>
     </Dialog>

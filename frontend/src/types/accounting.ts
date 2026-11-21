@@ -14,9 +14,19 @@ export type Account = {
   active: boolean;
   templateCode: string | null;
   description: string | null;
+  cashFlowCategory: CashFlowCategory | null;
   used: boolean;
   version: number;
 };
+
+export type CashFlowCategory = "CASH" | "OPERATING" | "NON_CASH" | "INVESTING" | "FINANCING";
+export const CASH_FLOW_CATEGORIES: { value: CashFlowCategory; label: string }[] = [
+  { value: "OPERATING", label: "Operating (working capital)" },
+  { value: "INVESTING", label: "Investing" },
+  { value: "FINANCING", label: "Financing" },
+  { value: "NON_CASH", label: "Non-cash (e.g. depreciation)" },
+  { value: "CASH", label: "Cash or cash equivalent" },
+];
 
 export type Period = {
   id: string;
@@ -27,11 +37,12 @@ export type Period = {
   status: "OPEN" | "CLOSED";
   closedBy: UserRef | null;
   closedAt: string | null;
+  yearClosed: boolean;
   version: number;
 };
 
 export type JournalStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "POSTED" | "CANCELLED";
-export type JournalType = "GENERAL" | "OPENING" | "ADJUSTMENT" | "REVERSAL";
+export type JournalType = "GENERAL" | "OPENING" | "ADJUSTMENT" | "REVERSAL" | "CLOSING";
 
 export type JournalSummary = {
   id: string;
@@ -59,6 +70,8 @@ export type JournalLine = {
   debit: string;
   credit: string;
   description: string | null;
+  partyId: string | null;
+  partyName: string | null;
 };
 
 export type JournalAction = "EDIT" | "SUBMIT" | "CANCEL" | "APPROVE" | "REJECT" | "POST" | "REVERSE";
@@ -117,6 +130,8 @@ export type ReportHeader = {
   generatedAt: string;
   basis: string;
   preparedBy: Letterhead;
+  compareFrom: string | null;
+  compareTo: string | null;
 };
 
 export type OrganisationSettings = {
@@ -157,7 +172,10 @@ export type Party = {
   version: number;
 };
 
-export type InvoiceType = "SALES" | "PURCHASE";
+export type InvoiceType = "SALES" | "PURCHASE" | "CREDIT_NOTE" | "DEBIT_NOTE";
+export const INVOICE_TYPE_LABEL: Record<InvoiceType, string> = {
+  SALES: "Sales invoice", PURCHASE: "Purchase invoice", CREDIT_NOTE: "Credit note", DEBIT_NOTE: "Debit note",
+};
 export type InvoiceStatus = "DRAFT" | "PENDING_APPROVAL" | "POSTED" | "CANCELLED";
 export type InvoiceLine = {
   id: string;
@@ -209,12 +227,17 @@ export type Invoice = {
   selfApproved: boolean;
   rejectionReason: string | null;
   lines: InvoiceLine[];
-  allowedActions: ("EDIT" | "SUBMIT" | "CANCEL" | "APPROVE" | "REJECT")[];
+  allowedActions: ("EDIT" | "SUBMIT" | "CANCEL" | "APPROVE" | "REJECT" | "CREDIT_NOTE" | "DEBIT_NOTE")[];
   createdAt: string;
   version: number;
+  originalInvoiceId: string | null;
+  originalNumber: string | null;
+  noteReason: string | null;
+  notesPostedTotal: string;
+  noteableBalance: string;
 };
 export type GstRate = { rate: string; description: string; reviewStatus: string };
-export type InvoiceSeries = { id: string; gstRegistrationId: string | null; gstin: string | null; prefix: string; nextNumberPreview: string };
+export type InvoiceSeries = { kind: "INVOICE" | "CREDIT_NOTE" | "DEBIT_NOTE"; id: string; gstRegistrationId: string | null; gstin: string | null; prefix: string; nextNumberPreview: string };
 
 export type BankImport = {
   id: string;
@@ -297,7 +320,12 @@ export type TrialBalance = {
   balanced: boolean;
 };
 
-export type StatementSection = { title: string; lines: { accountId: string; code: string; name: string; amount: string }[]; total: string };
+export type StatementSection = {
+  title: string;
+  lines: { accountId: string; code: string; name: string; amount: string; previous: string | null }[];
+  total: string;
+  previousTotal: string | null;
+};
 
 export type ProfitAndLoss = {
   header: ReportHeader;
@@ -306,6 +334,9 @@ export type ProfitAndLoss = {
   expenses: StatementSection[];
   totalExpenses: string;
   netProfit: string;
+  previousTotalIncome: string | null;
+  previousTotalExpenses: string | null;
+  previousNetProfit: string | null;
 };
 
 export type BalanceSheet = {
@@ -320,6 +351,11 @@ export type BalanceSheet = {
   totalLiabilitiesAndEquity: string;
   balanced: boolean;
   difference: string;
+  previousTotalAssets: string | null;
+  previousTotalLiabilities: string | null;
+  previousProfitForPeriod: string | null;
+  previousTotalEquity: string | null;
+  previousTotalLiabilitiesAndEquity: string | null;
 };
 
 export type GeneralLedger = {
@@ -337,3 +373,56 @@ export type GeneralLedger = {
   closingBalance: string;
   closingSide: string;
 };
+
+export type CashFlowSection = { title: string; lines: { accountId: string | null; code: string | null; label: string; amount: string }[]; total: string };
+export type CashFlow = {
+  header: ReportHeader;
+  netProfit: string;
+  nonCashAdjustments: CashFlowSection;
+  workingCapital: CashFlowSection;
+  operatingTotal: string;
+  investing: CashFlowSection;
+  financing: CashFlowSection;
+  netChange: string;
+  openingCash: string;
+  closingCash: string;
+  reconciles: boolean;
+  unclassifiedAccounts: string[];
+};
+
+export type AgeingRow = { partyId: string | null; partyName: string; gstin: string | null; outstanding: string; buckets: string[]; unlinked: string; advance: string };
+export type Ageing = {
+  kind: "RECEIVABLE" | "PAYABLE";
+  asOf: string;
+  bucketLabels: string[];
+  rows: AgeingRow[];
+  total: string;
+  bucketTotals: string[];
+  unlinkedTotal: string;
+  advanceTotal: string;
+  controlBalance: string;
+  reconciles: boolean;
+};
+
+export type RegisterRow = {
+  invoiceId: string; documentType: InvoiceType; number: string; date: string; partyName: string; partyGstin: string | null;
+  placeOfSupply: string; supplyType: string; reverseCharge: boolean; taxable: string; cgst: string; sgst: string; igst: string; total: string;
+};
+export type Register = { kind: "SALES" | "PURCHASE"; from: string; to: string; rows: RegisterRow[]; taxable: string; cgst: string; sgst: string; igst: string; total: string };
+
+export type RecurringFrequency = "MONTHLY" | "QUARTERLY" | "YEARLY";
+export type RecurringTemplate = {
+  id: string; name: string; narration: string; reference: string | null; frequency: RecurringFrequency; nextDate: string;
+  endDate: string | null; active: boolean; amount: string;
+  lines: { accountId: string; partyId: string | null; debit: string; credit: string; description: string | null }[];
+  version: number;
+};
+export type GenerateResult = { createdJournalIds: string[]; skipped: string[] };
+
+export type GstSlab = {
+  id: string; rate: string; effectiveFrom: string; effectiveTo: string | null; description: string; officialSource: string;
+  reviewStatus: "PENDING_REVIEW" | "APPROVED" | "RETIRED"; reviewedBy: string | null; reviewedAt: string | null;
+};
+
+export type ExportReport = "TRIAL_BALANCE" | "PROFIT_LOSS" | "BALANCE_SHEET" | "CASH_FLOW" | "LEDGER" | "AGEING_RECEIVABLE"
+  | "AGEING_PAYABLE" | "SALES_REGISTER" | "PURCHASE_REGISTER";

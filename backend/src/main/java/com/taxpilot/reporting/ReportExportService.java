@@ -105,7 +105,7 @@ public class ReportExportService {
         if (cmp) d.column("Previous", true, 22);
         statement(d, "Equity", bs.equity(), null, null, null, cmp);
         d.row(ReportDocument.Style.NORMAL, cells(cmp, "    Profit / (loss) for the period", bs.profitForPeriod(), bs.previousProfitForPeriod()));
-        d.row(ReportDocument.Style.SUBTOTAL, cells(cmp, "Total equity", bs.totalEquity(), bs.previousTotalEquity()));
+        d.row(ReportDocument.Style.SUBTOTAL, cells(cmp, "Total equity (including profit for the period)", bs.totalEquity(), bs.previousTotalEquity()));
         statement(d, "Liabilities", bs.liabilities(), "Total liabilities", bs.totalLiabilities(), bs.previousTotalLiabilities(), cmp);
         d.row(ReportDocument.Style.TOTAL, cells(cmp, "Total equity and liabilities", bs.totalLiabilitiesAndEquity(), bs.previousTotalLiabilitiesAndEquity()));
         statement(d, "Assets", bs.assets(), null, null, null, cmp);
@@ -120,7 +120,7 @@ public class ReportExportService {
         for (StatementSection s : sections) {
             d.row(ReportDocument.Style.NORMAL, cells(cmp, "  " + s.title(), "", ""));
             s.lines().forEach(l -> d.row(ReportDocument.Style.NORMAL, cells(cmp, "      " + l.code() + "  " + l.name(), l.amount(), l.previous())));
-            d.row(ReportDocument.Style.MUTED, cells(cmp, "  Total " + s.title().toLowerCase(), s.total(), s.previousTotal()));
+            d.row(ReportDocument.Style.MUTED, cells(cmp, "  Total " + s.title(), s.total(), s.previousTotal()));
         }
         if (totalLabel != null) d.row(ReportDocument.Style.SUBTOTAL, cells(cmp, totalLabel, total, prevTotal));
     }

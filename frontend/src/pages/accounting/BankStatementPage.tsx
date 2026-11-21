@@ -12,6 +12,8 @@ import { formatINR } from "@/lib/money";
 import { formatDate, formatDateTime, humanize } from "@/lib/utils";
 import type { BankImport, BankTxn, MatchSuggestion, ReconSummary } from "@/types/accounting";
 import { BANK_LABELS } from "./BankTab";
+import { partiesFor, partyKind } from "./JournalPage";
+import { useParties } from "./PartiesTab";
 
 const HINT_ACCOUNT: Record<string, string> = { BANK_CHARGES: "5320", INTEREST: "4210", CASH: "1110" };
 
@@ -241,12 +243,15 @@ function JournalDialog({ txn, clientId, bankLedgerId, onClose }: { txn: BankTxn;
   const suggested = txn.categoryHint ? options.find((a) => a.code === HINT_ACCOUNT[txn.categoryHint!])?.id : undefined;
   const [account, setAccount] = useState<string>("");
   const [narration, setNarration] = useState(txn.description);
+  const [partyId, setPartyId] = useState("");
   const [busy, setBusy] = useState(false);
+  const parties = useParties(clientId);
+  const kind = partyKind(options.find((a) => a.id === (account || suggested)));
   const submit = async () => {
     setBusy(true);
     try {
       const r = await api.post<{ journalId: string }>(`/bank-reconciliation/transactions/${txn.id}/create-journal`,
-        { counterAccountId: account || suggested, narration });
+        { counterAccountId: account || suggested, narration, partyId: kind && partyId ? partyId : null });
       queryClient.invalidateQueries({ queryKey: ["accounting"] });
       toast.success("Draft journal created. Submit it for approval; once posted, run auto-match.", {
         action: { label: "Open", onClick: () => navigate(`/accounting/journals/${r.journalId}`) },
@@ -265,11 +270,19 @@ function JournalDialog({ txn, clientId, bankLedgerId, onClose }: { txn: BankTxn;
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={busy} disabled={!(account || suggested)} onClick={submit}>Create draft journal</Button></>}>
       <div className="space-y-4">
         <Field label={deposit ? "Credit account" : "Debit account"} htmlFor="j-acc" hint={txn.categoryHint ? `Suggested from the description: ${humanize(txn.categoryHint)}` : undefined}>
-          <Select id="j-acc" value={account || suggested || ""} onChange={(e) => setAccount(e.target.value)}>
+          <Select id="j-acc" value={account || suggested || ""} onChange={(e) => { setAccount(e.target.value); setPartyId(""); }}>
             <option value="">Choose…</option>
             {options.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
           </Select>
         </Field>
+        {kind && (
+          <Field label={kind === "CUSTOMER" ? "Customer" : "Vendor"} htmlFor="j-party" hint="Recorded on the receivable / payable line so ageing stays accurate">
+            <Select id="j-party" value={partyId} onChange={(e) => setPartyId(e.target.value)}>
+              <option value="">Choose…</option>
+              {partiesFor(parties.data, kind).map((p) => <option key={p.id} value={p.id}>{p.name}{p.gstin ? ` · ${p.gstin}` : ""}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Narration" htmlFor="j-narr"><Input id="j-narr" value={narration} onChange={(e) => setNarration(e.target.value)} maxLength={1000} /></Field>
       </div>
     </Dialog>

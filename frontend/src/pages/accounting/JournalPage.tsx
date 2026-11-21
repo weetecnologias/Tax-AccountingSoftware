@@ -13,13 +13,21 @@ import { ApiError, api, request } from "@/lib/api";
 import { applyServerErrors, nullIfBlank } from "@/lib/forms";
 import { formatINR, isValidAmount, paiseToString, toPaise } from "@/lib/money";
 import { formatDate, formatDateTime, humanize } from "@/lib/utils";
-import type { JournalAction, JournalDetail } from "@/types/accounting";
+import type { Account, JournalAction, JournalDetail, Party } from "@/types/accounting";
+import { useParties } from "./PartiesTab";
+
+/** Receivable / payable ledgers carry a customer or vendor so ageing can be computed per party. */
+export const partyKind = (a: Account | undefined): "CUSTOMER" | "VENDOR" | null =>
+  a?.subtype === "RECEIVABLE" ? "CUSTOMER" : a?.subtype === "PAYABLE" ? "VENDOR" : null;
+export const partiesFor = (parties: Party[] | undefined, kind: "CUSTOMER" | "VENDOR" | null) =>
+  kind ? (parties ?? []).filter((p) => p.active && (p.partyType === "BOTH" || p.partyType === kind)) : [];
 
 const lineSchema = z.object({
   accountId: z.string().min(1, "Choose an account"),
   debit: z.string().refine(isValidAmount, "Max 2 decimals"),
   credit: z.string().refine(isValidAmount, "Max 2 decimals"),
   description: z.string().max(500),
+  partyId: z.string(),
 }).refine((l) => (toPaise(l.debit) ?? 0n) > 0n !== (toPaise(l.credit) ?? 0n) > 0n, { path: ["debit"], message: "Enter a debit or a credit" });
 
 const schema = z.object({
@@ -31,7 +39,7 @@ const schema = z.object({
 });
 type Values = z.infer<typeof schema>;
 
-const emptyLine = { accountId: "", debit: "", credit: "", description: "" };
+const emptyLine = { accountId: "", debit: "", credit: "", description: "", partyId: "" };
 
 export function JournalPage() {
   const { id } = useParams();
@@ -62,15 +70,16 @@ function JournalEditor({ clientId, existing, onDone }: { clientId: string; exist
   const queryClient = useQueryClient();
   const accounts = useAccounts(clientId);
   const ledgers = useMemo(() => postableAccounts(accounts.data), [accounts.data]);
+  const parties = useParties(clientId);
   const idempotencyKey = useRef(crypto.randomUUID());
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: existing ? {
-      entryDate: existing.entryDate, entryType: existing.entryType === "REVERSAL" ? "GENERAL" : existing.entryType,
+      entryDate: existing.entryDate, entryType: existing.entryType === "REVERSAL" || existing.entryType === "CLOSING" ? "GENERAL" : existing.entryType,
       narration: existing.narration, reference: existing.reference ?? "",
       lines: existing.lines.map((l) => ({ accountId: l.accountId, debit: l.debit === "0.00" ? "" : l.debit,
-        credit: l.credit === "0.00" ? "" : l.credit, description: l.description ?? "" })),
+        credit: l.credit === "0.00" ? "" : l.credit, description: l.description ?? "", partyId: l.partyId ?? "" })),
     } : { entryDate: new Date().toISOString().slice(0, 10), entryType: "GENERAL", narration: "", reference: "", lines: [{ ...emptyLine }, { ...emptyLine }] },
   });
   const { register, control, handleSubmit, formState, setError } = form;
@@ -81,10 +90,10 @@ function JournalEditor({ clientId, existing, onDone }: { clientId: string; exist
   const { reset, getValues } = form;
   const synced = useRef(false);
   useEffect(() => {
-    if (synced.current || !accounts.data) return;
+    if (synced.current || !accounts.data || !parties.data) return;
     synced.current = true;
     reset(getValues(), { keepDirty: true, keepErrors: true });
-  }, [accounts.data, reset, getValues]);
+  }, [accounts.data, parties.data, reset, getValues]);
   const e = formState.errors;
 
   let dr = 0n, cr = 0n, invalid = false;
@@ -102,7 +111,8 @@ function JournalEditor({ clientId, existing, onDone }: { clientId: string; exist
       const body = {
         clientId, entryDate: v.entryDate, entryType: v.entryType, narration: v.narration, reference: nullIfBlank(v.reference),
         lines: v.lines.map((l) => ({ accountId: l.accountId, debit: l.debit.replace(/,/g, "") || null,
-          credit: l.credit.replace(/,/g, "") || null, description: nullIfBlank(l.description) })),
+          credit: l.credit.replace(/,/g, "") || null, description: nullIfBlank(l.description),
+          partyId: partyKind(ledgers.find((a) => a.id === l.accountId)) ? nullIfBlank(l.partyId) : null })),
         version: existing?.version,
       };
       if (existing) return api.put<JournalDetail>(`/accounting/journals/${existing.id}`, body);
@@ -156,6 +166,8 @@ function JournalEditor({ clientId, existing, onDone }: { clientId: string; exist
             <tbody>
               {fields.map((f, i) => {
                 const le = e.lines?.[i];
+                const kind = partyKind(ledgers.find((a) => a.id === lines?.[i]?.accountId));
+                const options = partiesFor(parties.data, kind);
                 return (
                   <tr key={f.id} className="align-top">
                     <Td className="pt-5 text-muted">{i + 1}</Td>
@@ -165,6 +177,14 @@ function JournalEditor({ clientId, existing, onDone }: { clientId: string; exist
                         {ledgers.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
                       </Select>
                       {le?.accountId && <p className="mt-1 text-xs text-danger">{le.accountId.message}</p>}
+                      {kind && (
+                        <Select aria-label={`Line ${i + 1} ${kind === "CUSTOMER" ? "customer" : "vendor"}`} {...register(`lines.${i}.partyId`)}
+                          aria-invalid={!!le?.partyId} className="mt-2 min-w-64">
+                          <option value="">{kind === "CUSTOMER" ? "Customer (recommended)…" : "Vendor (recommended)…"}</option>
+                          {options.map((p) => <option key={p.id} value={p.id}>{p.name}{p.gstin ? ` · ${p.gstin}` : ""}</option>)}
+                        </Select>
+                      )}
+                      {le?.partyId && <p className="mt-1 text-xs text-danger">{le.partyId.message}</p>}
                     </Td>
                     <Td><Input aria-label={`Line ${i + 1} description`} {...register(`lines.${i}.description`)} /></Td>
                     <Td>
@@ -260,7 +280,7 @@ function JournalView({ journal: j, onEdit }: { journal: JournalDetail; onEdit: (
       <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={j.status} />
-          {j.entryType !== "GENERAL" && <Badge>{humanize(j.entryType)}</Badge>}
+          {j.entryType !== "GENERAL" && <Badge tone={j.entryType === "CLOSING" ? "warning" : "neutral"}>{j.entryType === "CLOSING" ? "Year-end closing" : humanize(j.entryType)}</Badge>}
           {j.reversalOfId && <Link to={`/accounting/journals/${j.reversalOfId}`} className="text-sm text-emerald hover:underline">Reverses {j.reversalOfNumber}</Link>}
           {j.reversedById && <Link to={`/accounting/journals/${j.reversedById}`} className="text-sm text-danger hover:underline">Reversed by {j.reversedByNumber ?? "draft reversal"}</Link>}
         </div>
@@ -294,7 +314,7 @@ function JournalView({ journal: j, onEdit }: { journal: JournalDetail; onEdit: (
               <tr key={l.id}>
                 <Td className="text-muted">{l.lineNo}</Td>
                 <Td><span className="font-mono text-xs">{l.accountCode}</span> · {l.accountName}</Td>
-                <Td className="text-muted">{l.description ?? ""}</Td>
+                <Td className="text-muted">{l.partyName && <span className="block text-ink">{l.partyName}</span>}{l.description ?? ""}</Td>
                 <Td className="text-right font-mono tabular-nums">{formatINR(l.debit, { blankZero: true })}</Td>
                 <Td className="text-right font-mono tabular-nums">{formatINR(l.credit, { blankZero: true })}</Td>
               </tr>

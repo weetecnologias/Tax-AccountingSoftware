@@ -15,6 +15,8 @@ import { InvoicesTab } from "./InvoicesTab";
 import { PartiesTab } from "./PartiesTab";
 import { JournalsTab } from "./JournalsTab";
 import { PeriodsTab } from "./PeriodsTab";
+import { AgeingTab, CashFlowTab, RegistersTab } from "./MoreReportTabs";
+import { RecurringTab } from "./RecurringTab";
 import { BalanceSheetTab, LedgerTab, ProfitLossTab, TrialBalanceTab } from "./ReportTabs";
 
 function suggestFy(fyStartMonth: number): string {
@@ -94,10 +96,14 @@ export function AccountingPage() {
             <TabsTrigger value="journals">Journals</TabsTrigger>
             <TabsTrigger value="invoices">Invoices</TabsTrigger>
             <TabsTrigger value="parties">Customers &amp; vendors</TabsTrigger>
+            <TabsTrigger value="recurring">Recurring</TabsTrigger>
             <TabsTrigger value="bank">Bank reconciliation</TabsTrigger>
             <TabsTrigger value="trial-balance">Trial balance</TabsTrigger>
             <TabsTrigger value="profit-loss">Profit &amp; loss</TabsTrigger>
             <TabsTrigger value="balance-sheet">Balance sheet</TabsTrigger>
+            <TabsTrigger value="cash-flow">Cash flow</TabsTrigger>
+            <TabsTrigger value="ageing">Ageing</TabsTrigger>
+            <TabsTrigger value="registers">Registers</TabsTrigger>
             <TabsTrigger value="ledger">General ledger</TabsTrigger>
             <TabsTrigger value="chart">Chart of accounts</TabsTrigger>
             <TabsTrigger value="periods">Periods</TabsTrigger>
@@ -105,10 +111,14 @@ export function AccountingPage() {
           <TabsContent value="journals" className="mt-5"><JournalsTab clientId={clientId} active={client.data?.status === "ACTIVE"} /></TabsContent>
           <TabsContent value="invoices" className="mt-5"><InvoicesTab clientId={clientId} active={client.data?.status === "ACTIVE"} /></TabsContent>
           <TabsContent value="parties" className="mt-5"><PartiesTab clientId={clientId} closed={client.data?.status === "CLOSED"} /></TabsContent>
+          <TabsContent value="recurring" className="mt-5"><RecurringTab clientId={clientId} active={client.data?.status === "ACTIVE"} /></TabsContent>
           <TabsContent value="bank" className="mt-5"><BankTab clientId={clientId} closed={client.data?.status === "CLOSED"} /></TabsContent>
           <TabsContent value="trial-balance" className="mt-5"><TrialBalanceTab clientId={clientId} /></TabsContent>
           <TabsContent value="profit-loss" className="mt-5"><ProfitLossTab clientId={clientId} /></TabsContent>
           <TabsContent value="balance-sheet" className="mt-5"><BalanceSheetTab clientId={clientId} /></TabsContent>
+          <TabsContent value="cash-flow" className="mt-5"><CashFlowTab clientId={clientId} /></TabsContent>
+          <TabsContent value="ageing" className="mt-5"><AgeingTab clientId={clientId} /></TabsContent>
+          <TabsContent value="registers" className="mt-5"><RegistersTab clientId={clientId} /></TabsContent>
           <TabsContent value="ledger" className="mt-5"><LedgerTab clientId={clientId} /></TabsContent>
           <TabsContent value="chart" className="mt-5"><ChartTab clientId={clientId} closed={client.data?.status === "CLOSED"} /></TabsContent>
           <TabsContent value="periods" className="mt-5"><PeriodsTab clientId={clientId} fyStartMonth={client.data?.fyStartMonth ?? 4} /></TabsContent>
