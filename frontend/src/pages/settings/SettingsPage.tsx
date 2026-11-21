@@ -14,6 +14,7 @@ import { applyServerErrors } from "@/lib/forms";
 import { formatDateTime, humanize } from "@/lib/utils";
 import type { Page, Permission, Role, User } from "@/types/api";
 import { passwordSchema } from "@/validation/ids";
+import { OrganisationTab } from "./OrganisationTab";
 
 export function SettingsPage() {
   const { can } = useAuth();
@@ -21,14 +22,16 @@ export function SettingsPage() {
   const tab = params.get("tab") ?? "users";
   return (
     <div>
-      <PageHeader title="Settings" description="Users, roles and permissions"
+      <PageHeader title="Settings" description="Users, roles, organisation letterhead and approval policy"
         actions={<Link to="/change-password"><Button variant="secondary"><KeyRound className="h-4 w-4" /> Change my password</Button></Link>} />
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
         <TabsList>
           <TabsTrigger value="users">Users</TabsTrigger>
           {can("ROLE_READ") && <TabsTrigger value="roles">Roles &amp; permissions</TabsTrigger>}
+          <TabsTrigger value="organisation">Organisation</TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="mt-5"><UsersTab /></TabsContent>
+        <TabsContent value="organisation" className="mt-5"><OrganisationTab /></TabsContent>
         {can("ROLE_READ") && <TabsContent value="roles" className="mt-5"><RolesTab /></TabsContent>}
       </Tabs>
     </div>

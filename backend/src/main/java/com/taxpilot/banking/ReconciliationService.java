@@ -57,7 +57,7 @@ public class ReconciliationService {
 
     // ---------------------------------------------------------------- DTOs
 
-    public record ImportDto(UUID id, UUID ledgerAccountId, String ledgerAccountName, String bankFormat,
+    public record ImportDto(UUID id, UUID clientId, UUID ledgerAccountId, String ledgerAccountName, String bankFormat,
                             String originalFilename, LocalDate periodFrom, LocalDate periodTo, String openingBalance,
                             String closingBalance, String totalDeposits, String totalWithdrawals, int lineCount,
                             int duplicateCount, long matched, long unmatched, long excluded,
@@ -314,6 +314,18 @@ public class ReconciliationService {
         return journalId;
     }
 
+    /** Removes an import that has not been signed off (e.g. uploaded against the wrong ledger). Audited. */
+    @Transactional
+    public void discard(UUID importId) {
+        StatementImport imp = findImport(importId);
+        requireInProgress(imp);
+        List<Transaction> rows = txns.findByImportIdOrderByRowNoAsc(importId);
+        txns.deleteAll(rows);
+        imports.delete(imp);
+        audit.record("BANK_STATEMENT_DISCARDED", "BANK_STATEMENT", importId, imp.getClientId(),
+                Map.of("file", imp.getOriginalFilename(), "transactions", rows.size()));
+    }
+
     // ---------------------------------------------------------------- sign-off and summary
 
     @Transactional
@@ -461,7 +473,7 @@ public class ReconciliationService {
         boolean canApprove = me != null && me.has(JournalService.APPROVE) && i.getStatus() == StatementImport.Status.IN_PROGRESS
                 && (!me.id().equals(i.getImportedBy()) || settings.allowSelfApproval());
         String accountName = accounts.findById(i.getLedgerAccountId()).map(a -> a.getCode() + " · " + a.getName()).orElse(null);
-        return new ImportDto(i.getId(), i.getLedgerAccountId(), accountName, i.getBankFormat(), i.getOriginalFilename(),
+        return new ImportDto(i.getId(), i.getClientId(), i.getLedgerAccountId(), accountName, i.getBankFormat(), i.getOriginalFilename(),
                 i.getPeriodFrom(), i.getPeriodTo(), str(i.getOpeningBalance()), str(i.getClosingBalance()),
                 Money.str(i.getTotalDeposits()), Money.str(i.getTotalWithdrawals()), i.getLineCount(),
                 i.getDuplicateCount(), txns.countByImportIdAndStatus(i.getId(), Transaction.Status.MATCHED),

@@ -70,6 +70,13 @@ public class BankingController {
         return service.summary(id);
     }
 
+    @org.springframework.web.bind.annotation.DeleteMapping("/statements/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasAuthority('ACCOUNTING_WRITE')")
+    public void discard(@PathVariable UUID id) {
+        service.discard(id);
+    }
+
     @PostMapping("/statements/{id}/auto-match")
     @PreAuthorize("hasAuthority('ACCOUNTING_WRITE')")
     public Map<String, Integer> autoMatch(@PathVariable UUID id) {

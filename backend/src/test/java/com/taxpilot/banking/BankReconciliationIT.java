@@ -131,6 +131,17 @@ class BankReconciliationIT extends AccountingTestSupport {
     }
 
     @Test
+    void unsignedImportsCanBeDiscardedAndReimported() throws Exception {
+        String importId = read(upload(accountant.token(), "hdfc-sample.csv", hdfc()).andExpect(status().isCreated())
+                .andReturn()).get("statement").get("id").asString();
+        mvc.perform(authed(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(
+                "/api/v1/bank-reconciliation/statements/" + importId), accountant.token())).andExpect(status().isNoContent());
+        upload(accountant.token(), "hdfc-sample.csv", hdfc()).andExpect(status().isCreated());
+        JsonNode audit = getJson("/api/v1/audit-logs?action=BANK_STATEMENT_DISCARDED&entityId=" + importId, admin());
+        assertThat(audit.get("totalItems").asLong()).isEqualTo(1);
+    }
+
+    @Test
     void importerCannotSignOffTheirOwnReconciliation() throws Exception {
         JsonNode imported = read(upload(partner.token(), "hdfc-sample.csv", hdfc()).andExpect(status().isCreated()).andReturn());
         String importId = imported.get("statement").get("id").asString();

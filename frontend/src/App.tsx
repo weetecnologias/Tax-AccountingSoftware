@@ -4,6 +4,8 @@ import { EmptyState } from "@/components/common";
 import { AppLayout } from "@/layouts/AppLayout";
 import { useAuth } from "@/lib/auth";
 import { AccountingPage } from "@/pages/accounting/AccountingPage";
+import { BankStatementPage } from "@/pages/accounting/BankStatementPage";
+import { InvoicePage } from "@/pages/accounting/InvoicePage";
 import { JournalPage } from "@/pages/accounting/JournalPage";
 import { AuditLogPage } from "@/pages/audit/AuditLogPage";
 import { ChangePasswordPage } from "@/pages/auth/ChangePasswordPage";
@@ -55,6 +57,9 @@ export function App() {
         <Route path="accounting" element={<RequirePermission permission="ACCOUNTING_READ"><AccountingPage /></RequirePermission>} />
         <Route path="accounting/journals/new" element={<RequirePermission permission="ACCOUNTING_WRITE"><JournalPage /></RequirePermission>} />
         <Route path="accounting/journals/:id" element={<RequirePermission permission="ACCOUNTING_READ"><JournalPage key="view" /></RequirePermission>} />
+        <Route path="accounting/invoices/new" element={<RequirePermission permission="ACCOUNTING_WRITE"><InvoicePage /></RequirePermission>} />
+        <Route path="accounting/invoices/:id" element={<RequirePermission permission="ACCOUNTING_READ"><InvoicePage /></RequirePermission>} />
+        <Route path="accounting/bank/:id" element={<RequirePermission permission="ACCOUNTING_READ"><BankStatementPage /></RequirePermission>} />
         <Route path="audit" element={<RequirePermission permission="AUDIT_READ"><AuditLogPage /></RequirePermission>} />
         <Route path="settings" element={<RequirePermission permission="USER_READ"><SettingsPage /></RequirePermission>} />
         <Route path="*" element={<EmptyState title="Page not found" description="Check the address and try again." />} />

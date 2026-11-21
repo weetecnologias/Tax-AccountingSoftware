@@ -76,6 +76,15 @@ function JournalEditor({ clientId, existing, onDone }: { clientId: string; exist
   const { register, control, handleSubmit, formState, setError } = form;
   const { fields, append, remove } = useFieldArray({ control, name: "lines" });
   const lines = useWatch({ control, name: "lines" });
+
+  // Account selects cannot show a saved value until the chart has loaded: re-apply values once it arrives.
+  const { reset, getValues } = form;
+  const synced = useRef(false);
+  useEffect(() => {
+    if (synced.current || !accounts.data) return;
+    synced.current = true;
+    reset(getValues(), { keepDirty: true, keepErrors: true });
+  }, [accounts.data, reset, getValues]);
   const e = formState.errors;
 
   let dr = 0n, cr = 0n, invalid = false;
