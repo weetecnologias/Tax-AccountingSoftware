@@ -22,7 +22,7 @@ A **client** is a taxpayer serviced by the organisation; a **user** is a staff m
 | Phase | Deliverable | Status |
 |---|---|---|
 | 0 | Architecture, ERD, PRD/SRS, UI/UX spec, API contracts, backlog | Done (this folder) |
-| 1 | Login, users/roles, dashboard, clients + onboarding, document upload/storage, audit log | In progress |
+| 1 | Login, users/roles, dashboard, clients + onboarding, document upload/storage, audit log | Done (branch `feature`, pending merge to `develop`) |
 | 2 | Accounting engine: CoA, periods, journals, ledgers, trial balance, bank reconciliation, statements, approvals | Planned |
 | 3 | GST engine: registrations, registers, GSTR-1, GSTR-2B reconciliation, ITC, GSTR-3B | Planned |
 | 4 | Income-tax engine: taxpayer profiles, AIS/TIS/26AS, Form 16, computation, regimes, ITR drafts | Planned |

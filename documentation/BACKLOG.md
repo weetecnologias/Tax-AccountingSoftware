@@ -2,7 +2,14 @@
 
 Legend: **P1** Phase 1 carry-over · **P2** Phase 2 (accounting engine) · later phases summarised.
 
+## Phase 1 — delivered 2026-11-21 (see PROGRESS.md)
+
 ## Phase 1 carry-over
+- [ ] CI pipeline (GitHub Actions: `mvn verify`, `npm test`, `npm run build`) and branch protection on `main`
+- [ ] Route-level code splitting (frontend bundle is ~1 MB)
+- [ ] Log each reveal of full PAN / bank number (access log), not only downloads
+- [ ] Persist `Document` and other non-BaseEntity rows via `persist()` (currently `merge()`, functionally correct)
+- [ ] Add Mockito as a Java agent in the test JVM (JDK self-attach warning)
 - [ ] MFA (TOTP) enrolment and enforcement for ADMIN/PARTNER
 - [ ] Forgot-password flow (needs SMTP provider)
 - [ ] Redis-backed distributed rate limiting (current limiter is in-process)
