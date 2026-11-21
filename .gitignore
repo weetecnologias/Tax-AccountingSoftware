@@ -25,7 +25,11 @@ venv/
 __pycache__/
 *.pyc
 
+# Local document storage
+data/
+
 # Build output
+target/
 dist/
 build/
 out/
