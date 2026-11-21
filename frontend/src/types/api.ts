@@ -203,6 +203,9 @@ export type DashboardSummary = {
   documentsByStatus: Record<string, number>;
   uploadsLast14Days: { day: string; count: number }[];
   recentActivity: AuditEntry[];
+  journalsAwaitingApproval: number;
+  journalsAwaitingPosting: number;
+  journalsPostedThisMonth: number;
 };
 
 export type Option = { value: string; label: string };

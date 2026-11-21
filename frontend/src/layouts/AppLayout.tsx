@@ -1,4 +1,4 @@
-import { FileText, KeyRound, LayoutDashboard, LogOut, Menu, ScrollText, Settings, Users2, X } from "lucide-react";
+import { BookOpen, FileText, KeyRound, LayoutDashboard, LogOut, Menu, ScrollText, Settings, Users2, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -9,6 +9,7 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, permission: "DASHBOARD_READ", end: true },
   { to: "/clients", label: "Clients", icon: Users2, permission: "CLIENT_READ" },
   { to: "/documents", label: "Documents", icon: FileText, permission: "DOCUMENT_READ" },
+  { to: "/accounting", label: "Accounting", icon: BookOpen, permission: "ACCOUNTING_READ" },
   { to: "/audit", label: "Audit Log", icon: ScrollText, permission: "AUDIT_READ" },
   { to: "/settings", label: "Settings", icon: Settings, permission: "USER_READ" },
 ];

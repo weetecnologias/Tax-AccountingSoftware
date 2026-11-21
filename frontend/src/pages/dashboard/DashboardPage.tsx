@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Clock, Copy, FileText, UserX, Users2 } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Clock, Copy, FileText, UserX, Users2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -76,6 +76,15 @@ export function DashboardPage() {
             <Metric label="Suspected duplicates" value={d.suspectedDuplicates} icon={<Copy className="h-5 w-5" />}
               tone={d.suspectedDuplicates ? "danger" : "default"} to="/documents?status=DUPLICATE_SUSPECTED" />
             <Metric label="Documents uploaded today" value={d.documentsUploadedToday} icon={<FileText className="h-5 w-5" />} />
+            {can("ACCOUNTING_READ") && (
+              <>
+                <Metric label="Journals awaiting approval" value={d.journalsAwaitingApproval} icon={<Clock className="h-5 w-5" />}
+                  tone={d.journalsAwaitingApproval ? "warning" : "default"} />
+                <Metric label="Approved journals awaiting posting" value={d.journalsAwaitingPosting} icon={<BookOpen className="h-5 w-5" />}
+                  tone={d.journalsAwaitingPosting ? "warning" : "default"} />
+                <Metric label="Journals posted this month" value={d.journalsPostedThisMonth} icon={<CheckCircle2 className="h-5 w-5" />} tone="success" />
+              </>
+            )}
           </>
         )}
       </div>
@@ -128,7 +137,7 @@ export function DashboardPage() {
         )}
       </div>
       <p className="mt-6 text-xs text-muted">
-        GST, income-tax, reconciliation and AI metrics will appear here as those modules are delivered.
+        GST, income-tax, bank reconciliation and AI metrics will appear here as those modules are delivered.
       </p>
     </div>
   );

@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Upload } from "lucide-react";
+import { BookOpen, Pencil, Upload } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -100,6 +100,9 @@ export function ClientDetailPage() {
           <>
             {can("DOCUMENT_UPLOAD") && !closed && (
               <Button variant="secondary" onClick={() => setUploadOpen(true)}><Upload className="h-4 w-4" /> Upload document</Button>
+            )}
+            {can("ACCOUNTING_READ") && (
+              <Button variant="secondary" onClick={() => navigate(`/accounting?clientId=${id}`)}><BookOpen className="h-4 w-4" /> Books</Button>
             )}
             {editable && c.panRevealed && (
               <Button variant="secondary" onClick={() => navigate(`/clients/${id}/edit`)}><Pencil className="h-4 w-4" /> Edit</Button>
