@@ -230,15 +230,26 @@ public class JournalEntry extends BaseEntity {
 
         private String description;
 
+        /** Customer / vendor sub-ledger, set on receivable and payable control-account lines. */
+        @Column(name = "party_id")
+        private UUID partyId;
+
         protected Line() {
         }
 
         public Line(UUID accountId, BigDecimal debit, BigDecimal credit, String description) {
+            this(accountId, debit, credit, description, null);
+        }
+
+        public Line(UUID accountId, BigDecimal debit, BigDecimal credit, String description, UUID partyId) {
             this.accountId = accountId;
             this.debit = Money.of(debit);
             this.credit = Money.of(credit);
             this.description = description;
+            this.partyId = partyId;
         }
+
+        public UUID getPartyId() { return partyId; }
 
         public UUID getId() { return id; }
         public short getLineNo() { return lineNo; }
