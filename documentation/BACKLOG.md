@@ -35,14 +35,19 @@ Legend: **P1** Phase 1 carry-over · **P2** Phase 2 (accounting engine) · later
 - [x] Bank statement import (CSV/XLS/XLSX; HDFC, ICICI, SBI, Axis, Kotak, generic), overlap protection,
       exact auto-matching, suggestions, manual match / exclude, draft journals, reconciliation statement, sign-off, discard
 
-## Phase 2B part 2 — next
-- [ ] Cash book and bank book views; cash flow statement (indirect method)
-- [ ] Recurring journals; year-end close (transfer P&L to retained earnings, carry forward balances)
-- [ ] Comparison with previous period / budget; monthly, quarterly, half-yearly presets
-- [ ] PDF / Excel exports using the letterhead (prepared by, reviewed by, version)
-- [ ] Credit / debit notes against posted invoices; sales and purchase registers; receivable / payable ageing
-- [ ] Printable tax invoice (PDF) for sales invoices
-- [ ] Tax-expert review workflow for the GST rate master (slabs currently `PENDING_REVIEW`)
+## Phase 2B part 2 — delivered 2026-11-21
+- [x] Cash flow statement (indirect method) with per-ledger cash-flow category
+- [x] Recurring journals; year-end close (P&L to retained earnings, year locked)
+- [x] Comparison with the previous year (P&L, balance sheet)
+- [x] PDF / Excel exports of every report on the letterhead (prepared by, generated at; audited)
+- [x] Credit / debit notes against posted invoices; sales and purchase registers; receivable / payable ageing
+- [x] Printable tax invoice / credit note / debit note (PDF)
+- [x] Tax-expert review of the GST rate master (approve per slab, audited)
+
+## Phase 2B — carried forward
+- [ ] Cash book and bank book views; budget comparison; monthly / quarterly / half-yearly presets
+- [ ] Receipt / payment allocation to specific invoices (ageing currently allocates newest-first)
+- [ ] "Reviewed by" sign-off and version on exported reports
 - [ ] Bank import column-mapping screen for layouts the header detection cannot recognise; PDF statements
 - [ ] Redis + background job runner with retries and dead-letter (large statement imports)
 - [ ] Per-entity chart templates (individual, firm, company) and template versioning UI

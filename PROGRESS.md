@@ -141,4 +141,40 @@ as "Hdfc". Added "discard import" so a wrong import can be undone.
 ageing, cash flow, year-end close or PDF/Excel reports yet (part 2); unrecognised bank layouts need a mapping screen;
 PDF statements are not parsed.
 
-### Next: Phase 2B part 2 — see `documentation/BACKLOG.md`.
+## 2026-11-21 — Session 1 (continued): Phase 2B part 2 (branch `feature`)
+
+**Implemented** — cash flow statement (indirect method) with a cash-flow category per ledger; previous-year comparison
+on P&L and balance sheet; year-end close (draft closing journal → normal approval → posting closes the year, reopening
+blocked, stale entries refused); recurring journal templates generating idempotent drafts; credit notes (against sales)
+and debit notes (against purchases) with their own CN/DN series, capped at the original's remaining value; customer /
+vendor on receivable and payable lines (journals and bank-created journals); receivable / payable ageing that
+reconciles to the control ledger; sales and purchase registers; PDF and Excel export of every report on the letterhead
+(audited); printable tax invoice / credit note / debit note with amount in words and a draft watermark; GST rate slab
+review by a tax approver (`TAX_RULES_APPROVE`); Settings → Tax rules.
+
+**Migration** — V11: cash-flow category (back-filled), `CLOSING` journal type, recurring journal tables, credit/debit
+note columns and constraints, note series kinds, `TAX_RULES_APPROVE` permission.
+
+**API** — `documentation/api/API-Phase2B2-Reports-Notes-Close.md`.
+
+**Tests**
+| Suite | Count | Result |
+|---|---|---|
+| Backend unit (adds amount in words, Indian grouping, PDF/XLSX rendering, ageing buckets) | 47 | pass |
+| Backend integration (adds cash flow + comparisons, year-end close incl. stale/locked year, recurring generation, party lines, all nine exports, GST rate review, credit note + cap + register + ageing, debit note, invoice PDF) | 50 | pass |
+| Frontend unit (adds previous-year dates, party-line rules) | 17 | pass |
+| Browser: cash flow on demo books reconciles (₹4,55,000); PDF + Excel exports download; credit note raised from INV/26-27/00001 (5 rolls, ₹4,958.96) with locked inherited fields; draft note PDF watermarked; invoice PDF checked against Rule 46 particulars; ageing agrees with control ledger; P&L comparison; recurring dialog; Tax rules tab | — | pass |
+
+**Defects found and fixed** — recurring generation treated every open period as "no financial year" (`Optional.map`
+returning null); `invoice_type` column too short for `CREDIT_NOTE`; the rupee sign has no glyph in the standard PDF
+fonts (printed as "Rs."); account dialog dropped the locked Type/Group fields from the submitted form, so accounts with
+postings could not be edited.
+
+**Demo data note** — a draft credit note against INV/26-27/00001 was left in the demo client for trying the approval
+flow. The demo year has not been closed and no GST slab has been approved (both are decisions for a reviewer).
+
+**Known limitations** — ageing allocates balances to the newest invoices (no explicit receipt-to-invoice allocation
+yet); entries posted before party lines existed show as "unassigned"; budgets and cash/bank book views not built; no
+column-mapping screen for unknown bank layouts; reports carry "prepared by" but no "reviewed by" sign-off yet.
+
+### Next: Phase 3 (GST) — see `documentation/BACKLOG.md`.
