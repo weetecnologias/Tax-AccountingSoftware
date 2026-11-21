@@ -1,0 +1,21 @@
+# Test-only settings. These keys are fixed, public test values and must never be used outside tests.
+spring:
+  config:
+    import: []
+taxpilot:
+  security:
+    jwt-secret: dGVzdC1vbmx5LWp3dC1zZWNyZXQtMzItYnl0ZXMhISE=
+    cookie-secure: false
+    auth-requests-per-minute: 10000
+  crypto:
+    encryption-key: dGVzdC1vbmx5LWVuY3J5cHRpb24ta2V5LTMyYnl0ZXM=
+    hmac-key: dGVzdC1vbmx5LWhtYWMta2V5LTMyLWJ5dGVzLWxvbmc=
+  storage:
+    type: local
+    local-path: ${java.io.tmpdir}/taxpilot-test-documents
+  scan:
+    enabled: false
+  bootstrap:
+    admin-email: admin@test.local
+    admin-password: AdminTestPass123
+    admin-name: Test Admin

@@ -1,0 +1,92 @@
+# TAXPILOT AI backend configuration.
+# Secrets come from environment variables (or a git-ignored .env file in the project root or backend folder).
+spring:
+  application:
+    name: taxpilot-backend
+  config:
+    import:
+      - optional:file:./.env[.properties]
+      - optional:file:../.env[.properties]
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/taxpilot}
+    username: ${DB_USER:taxpilot}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: 26MB
+      max-request-size: 27MB
+  jackson:
+    default-property-inclusion: always
+
+server:
+  port: ${PORT:8080}
+  error:
+    include-stacktrace: never
+    include-message: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  api-docs:
+    path: /api/v1/openapi
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: ${SWAGGER_ENABLED:true}
+
+taxpilot:
+  security:
+    jwt-secret: ${TAXPILOT_JWT_SECRET:}
+    jwt-issuer: taxpilot
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+    cookie-secure: ${TAXPILOT_COOKIE_SECURE:true}
+    auth-requests-per-minute: ${TAXPILOT_AUTH_RATE_LIMIT:10}
+    max-failed-logins: 5
+    lockout-duration: 15m
+  crypto:
+    encryption-key: ${TAXPILOT_ENCRYPTION_KEY:}
+    hmac-key: ${TAXPILOT_HMAC_KEY:}
+  storage:
+    type: ${TAXPILOT_STORAGE_TYPE:local}
+    local-path: ${TAXPILOT_STORAGE_PATH:./data/documents}
+    max-upload-bytes: 26214400
+    s3:
+      endpoint: ${S3_ENDPOINT:}
+      region: ${S3_REGION:ap-south-1}
+      bucket: ${S3_BUCKET:taxpilot-documents}
+      access-key: ${S3_ACCESS_KEY:}
+      secret-key: ${S3_SECRET_KEY:}
+  scan:
+    enabled: ${TAXPILOT_SCAN_ENABLED:false}
+    host: ${CLAMAV_HOST:localhost}
+    port: ${CLAMAV_PORT:3310}
+    timeout: 30s
+  bootstrap:
+    admin-email: ${TAXPILOT_ADMIN_EMAIL:}
+    admin-password: ${TAXPILOT_ADMIN_PASSWORD:}
+    admin-name: ${TAXPILOT_ADMIN_NAME:Administrator}
+  cors:
+    allowed-origins: ${TAXPILOT_CORS_ORIGINS:}
+
+logging:
+  pattern:
+    level: "%5p [%X{requestId:-}]"
