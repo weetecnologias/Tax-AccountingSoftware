@@ -24,7 +24,7 @@ public final class AccountingDtos {
 
     public record AccountDto(UUID id, String code, String name, AccountType accountType, String subtype, UUID parentId,
                              boolean group, boolean active, String templateCode, String description, boolean used,
-                             long version) {
+                             String cashFlowCategory, long version) {
     }
 
     public record AccountRequest(
@@ -37,6 +37,8 @@ public final class AccountingDtos {
             boolean group,
             Boolean active,
             @Size(max = 500) String description,
+            @Pattern(regexp = "^$|^(CASH|OPERATING|NON_CASH|INVESTING|FINANCING)$", message = "Unknown cash-flow category")
+            String cashFlowCategory,
             Long version) {
     }
 
@@ -46,7 +48,8 @@ public final class AccountingDtos {
     // ---- periods ----
 
     public record PeriodDto(UUID id, String financialYear, int periodNumber, LocalDate startDate, LocalDate endDate,
-                            AccountingPeriod.Status status, UserRef closedBy, Instant closedAt, long version) {
+                            AccountingPeriod.Status status, UserRef closedBy, Instant closedAt, boolean yearClosed,
+                            long version) {
     }
 
     public record OpenYearRequest(@NotNull UUID clientId,
@@ -60,7 +63,10 @@ public final class AccountingDtos {
     // ---- journals ----
 
     public record JournalLineRequest(@NotNull UUID accountId, String debit, String credit,
-                                     @Size(max = 500) String description) {
+                                     @Size(max = 500) String description, UUID partyId) {
+        public JournalLineRequest(UUID accountId, String debit, String credit, String description) {
+            this(accountId, debit, credit, description, null);
+        }
     }
 
     public record JournalRequest(
@@ -74,7 +80,7 @@ public final class AccountingDtos {
     }
 
     public record JournalLineDto(UUID id, int lineNo, UUID accountId, String accountCode, String accountName,
-                                 String debit, String credit, String description) {
+                                 String debit, String credit, String description, UUID partyId, String partyName) {
     }
 
     public record JournalSummaryDto(UUID id, String entryNumber, LocalDate entryDate, JournalEntry.Type entryType,

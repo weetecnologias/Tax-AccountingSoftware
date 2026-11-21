@@ -204,15 +204,34 @@ public class AccountingController {
     public FinancialReportService.ProfitAndLoss profitLoss(
             @RequestParam UUID clientId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        return reports.profitAndLoss(clientId, from, to);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate compareFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate compareTo) {
+        return reports.profitAndLoss(clientId, from, to, compareFrom, compareTo);
     }
 
     @GetMapping("/balance-sheet")
     @PreAuthorize("hasAuthority('ACCOUNTING_READ')")
     public FinancialReportService.BalanceSheet balanceSheet(
             @RequestParam UUID clientId,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
-        return reports.balanceSheet(clientId, asOf);
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate compareAsOf) {
+        return reports.balanceSheet(clientId, asOf, compareAsOf);
+    }
+
+    @GetMapping("/cash-flow")
+    @PreAuthorize("hasAuthority('ACCOUNTING_READ')")
+    public FinancialReportService.CashFlow cashFlow(
+            @RequestParam UUID clientId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return reports.cashFlow(clientId, from, to);
+    }
+
+    /** Prepares the year-end closing journal as a DRAFT; it is then submitted, approved and posted as usual. */
+    @PostMapping("/financial-years/{financialYear}/prepare-close")
+    @PreAuthorize("hasAuthority('ACCOUNTING_WRITE')")
+    public JournalDetailDto prepareYearEnd(@PathVariable String financialYear, @Valid @RequestBody ClientRef ref) {
+        return journals.prepareYearEnd(ref.clientId(), financialYear);
     }
 }

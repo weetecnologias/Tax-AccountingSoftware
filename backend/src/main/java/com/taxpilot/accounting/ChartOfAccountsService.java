@@ -72,6 +72,8 @@ public class ChartOfAccountsService {
             LedgerAccount a = new LedgerAccount(clientId, t.code(), t.name(), AccountType.valueOf(t.type()), t.group(),
                     template.templateId() + ":" + t.code());
             a.setSubtype(t.subtype());
+            a.setCashFlowCategory(LedgerAccount.defaultCashFlowCategory(a.getAccountType(), t.subtype(),
+                    a.getTemplateCode(), t.group()));
             if (t.parent() != null) {
                 UUID parentId = idsByCode.get(t.parent());
                 if (parentId == null) {
@@ -173,6 +175,15 @@ public class ChartOfAccountsService {
         a.setParentId(req.parentId());
         a.setSubtype(req.subtype() == null || req.subtype().isBlank() ? null : req.subtype().trim().toUpperCase());
         a.setDescription(req.description() == null || req.description().isBlank() ? null : req.description().trim());
+        boolean pl = req.accountType() == AccountType.INCOME || req.accountType() == AccountType.EXPENSE;
+        if (req.group() || pl) {
+            a.setCashFlowCategory(null);
+        } else if (req.cashFlowCategory() != null && !req.cashFlowCategory().isBlank()) {
+            a.setCashFlowCategory(req.cashFlowCategory());
+        } else {
+            a.setCashFlowCategory(LedgerAccount.defaultCashFlowCategory(req.accountType(), a.getSubtype(),
+                    a.getTemplateCode(), false));
+        }
     }
 
     Template loadTemplate() {
@@ -186,6 +197,6 @@ public class ChartOfAccountsService {
     AccountDto toDto(LedgerAccount a) {
         return new AccountDto(a.getId(), a.getCode(), a.getName(), a.getAccountType(), a.getSubtype(), a.getParentId(),
                 a.isGroup(), a.isActive(), a.getTemplateCode(), a.getDescription(), accounts.isUsed(a.getId()),
-                a.getVersion());
+                a.getCashFlowCategory(), a.getVersion());
     }
 }

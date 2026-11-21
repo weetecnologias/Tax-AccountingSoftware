@@ -35,7 +35,7 @@ public class BankingController {
     public record MatchRequest(@NotNull UUID lineId) {
     }
 
-    public record JournalDraftRequest(@NotNull UUID counterAccountId, String narration) {
+    public record JournalDraftRequest(@NotNull UUID counterAccountId, String narration, UUID partyId) {
     }
 
     @GetMapping("/statements")
@@ -116,6 +116,6 @@ public class BankingController {
     @PostMapping("/transactions/{id}/create-journal")
     @PreAuthorize("hasAuthority('ACCOUNTING_WRITE')")
     public Map<String, UUID> createJournal(@PathVariable UUID id, @RequestBody JournalDraftRequest r) {
-        return Map.of("journalId", service.createJournal(id, r.counterAccountId(), r.narration()));
+        return Map.of("journalId", service.createJournal(id, r.counterAccountId(), r.narration(), r.partyId()));
     }
 }

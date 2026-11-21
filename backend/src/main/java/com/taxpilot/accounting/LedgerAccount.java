@@ -48,8 +48,29 @@ public class LedgerAccount extends BaseEntity {
 
     private String description;
 
+    /** Cash-flow statement classification: CASH, OPERATING, NON_CASH, INVESTING or FINANCING (null for P&L/groups). */
+    @Column(name = "cash_flow_category")
+    private String cashFlowCategory;
+
     @Version
     private long version;
+
+    public String getCashFlowCategory() { return cashFlowCategory; }
+    public void setCashFlowCategory(String c) { this.cashFlowCategory = c; }
+
+    /** Default classification used when an account is created; mirrors migration V11. */
+    public static String defaultCashFlowCategory(AccountType type, String subtype, String templateCode, boolean group) {
+        if (group || type == AccountType.INCOME || type == AccountType.EXPENSE) return null;
+        if ("CASH".equals(subtype) || "BANK".equals(subtype)) return "CASH";
+        if ("CONTRA_ASSET".equals(subtype)) return "NON_CASH";
+        if ("FIXED_ASSET".equals(subtype) || "IN-STANDARD:1230".equals(templateCode) || "IN-STANDARD:1240".equals(templateCode)) {
+            return "INVESTING";
+        }
+        if (type == AccountType.EQUITY || "IN-STANDARD:2170".equals(templateCode) || "IN-STANDARD:2210".equals(templateCode)) {
+            return "FINANCING";
+        }
+        return "OPERATING";
+    }
 
     protected LedgerAccount() {
     }

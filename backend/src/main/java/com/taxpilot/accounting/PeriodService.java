@@ -29,14 +29,16 @@ public class PeriodService {
     private final ClientService clients;
     private final UserRepository users;
     private final AuditService audit;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     public PeriodService(PeriodRepository periods, JournalRepository journals, ClientService clients,
-                         UserRepository users, AuditService audit) {
+                         UserRepository users, AuditService audit, org.springframework.jdbc.core.JdbcTemplate jdbc) {
         this.periods = periods;
         this.journals = journals;
         this.clients = clients;
         this.users = users;
         this.audit = audit;
+        this.jdbc = jdbc;
     }
 
     @Transactional(readOnly = true)
@@ -98,6 +100,10 @@ public class PeriodService {
         if (p.getStatus() == AccountingPeriod.Status.OPEN) {
             return toDto(p);
         }
+        if (yearClosed(p.getClientId(), p.getFinancialYear())) {
+            throw ApiException.conflict("YEAR_CLOSED", "Financial year " + p.getFinancialYear()
+                    + " has a posted year-end closing entry, so its periods cannot be reopened");
+        }
         clients.findOpen(p.getClientId());
         p.reopen();
         periods.save(p);
@@ -105,6 +111,32 @@ public class PeriodService {
                 Map.of("financialYear", p.getFinancialYear(), "period", p.getStartDate().toString(),
                         "reason", reason.trim()));
         return toDto(p);
+    }
+
+    public List<AccountingPeriod> yearPeriods(UUID clientId, String financialYear) {
+        return periods.findByClientIdAndFinancialYearOrderByPeriodNumberAsc(clientId, financialYear);
+    }
+
+    /** Closes every still-open period of the year (called when the year-end closing entry is posted). */
+    @Transactional
+    public int closeYear(UUID clientId, String financialYear, UUID by) {
+        int n = 0;
+        for (AccountingPeriod p : yearPeriods(clientId, financialYear)) {
+            if (p.getStatus() == AccountingPeriod.Status.OPEN) {
+                p.close(by);
+                periods.save(p);
+                n++;
+            }
+        }
+        return n;
+    }
+
+    boolean yearClosed(UUID clientId, String financialYear) {
+        Integer n = jdbc.queryForObject("""
+                select count(*) from journal_entries
+                where client_id = ? and closing_financial_year = ? and status = 'POSTED'
+                """, Integer.class, clientId, financialYear);
+        return n != null && n > 0;
     }
 
     public AccountingPeriod find(UUID id) {
@@ -132,6 +164,6 @@ public class PeriodService {
     PeriodDto toDto(AccountingPeriod p) {
         return new PeriodDto(p.getId(), p.getFinancialYear(), p.getPeriodNumber(), p.getStartDate(), p.getEndDate(),
                 p.getStatus(), p.getClosedBy() == null ? null : UserRef.of(users.findById(p.getClosedBy()).orElse(null)),
-                p.getClosedAt(), p.getVersion());
+                p.getClosedAt(), yearClosed(p.getClientId(), p.getFinancialYear()), p.getVersion());
     }
 }
