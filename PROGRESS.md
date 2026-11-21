@@ -106,4 +106,39 @@ frontend folder; docs are now edited in a separate git worktree.
 **Known limitations** — no bank reconciliation, invoices, cash flow, year-end close or PDF export yet (Phase 2B);
 every journal needs approval (no threshold rules yet); one chart template for all entity types.
 
-### Next: Phase 2B — see `documentation/BACKLOG.md`.
+## 2026-11-21 — Session 1 (continued): Phase 2B part 1 (branch `feature`)
+
+**Decisions recorded (from the product owner)**
+- Sample bank statements: synthetic files in five bank layouts (`database/seed-data/bank-statements`, clearly marked).
+- Approval stays mandatory; an organisation setting chooses whether the same person may approve (default: no).
+- Invoice numbering `INV/26-27/00001`, one series per GSTIN, prefix editable per client (16-character GST limit).
+- Letterhead: TAXPILOT AI placeholders, editable in Settings → Organisation.
+
+**Implemented** — organisation settings (letterhead, approval policy); customers/vendors; GST sales and purchase
+invoices with versioned rate slabs, intra/inter-state split, RCM, ITC, duplicate supplier-invoice check, approve-and-post
+creating a posted journal; bank statement import (CSV/XLS/XLSX, header detection for HDFC/ICICI/SBI/Axis/Kotak/generic,
+running-balance check, overlap protection), exact auto-match, probable/partial suggestions with evidence, manual
+match/unmatch/exclude, draft journals from bank lines, bank reconciliation statement, maker-checker sign-off, discard.
+
+**Migrations** — V8 organisation settings + `SETTINGS_WRITE` · V9 parties, GST rate slabs, invoice series and
+invoices (+ immutability triggers), party on journal lines · V10 bank imports and transactions.
+
+**API** — `documentation/api/API-Phase2B-Invoices-Banking.md`.
+
+**Tests**
+| Suite | Count | Result |
+|---|---|---|
+| Backend unit (adds statement parser over all five sample layouts + XLSX, GST calculator, numbering limit) | 43 | pass |
+| Backend integration (adds 7 invoice and 4 reconciliation scenarios, self-approval policy) | 41 | pass |
+| Frontend unit (adds exact GST preview) | 13 | pass |
+| Browser end-to-end: add customer by GSTIN → sales invoice 50 × ₹840.50 @ 18% (preview = server: ₹49,589.50) → submit → partner approves → `INV/26-27/00001`, journal `JV/2026-27/00004` → import HDFC sample → capital auto-matched (exact 95%) → rent suggested (probable 80%, 2 days apart) and matched → reconciliation statement balances to ₹6,92,132 | — | pass |
+
+**Defects found and fixed** — GST rate (and saved account) selects lost their value when option lists loaded after the
+form (would have submitted 0%); statement import defaulted to the cash ledger (bank ledgers now first); bank names shown
+as "Hdfc". Added "discard import" so a wrong import can be undone.
+
+**Known limitations** — GST rate slabs await tax-expert review; no credit/debit notes, printable invoice PDF,
+ageing, cash flow, year-end close or PDF/Excel reports yet (part 2); unrecognised bank layouts need a mapping screen;
+PDF statements are not parsed.
+
+### Next: Phase 2B part 2 — see `documentation/BACKLOG.md`.

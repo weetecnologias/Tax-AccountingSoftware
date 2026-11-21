@@ -24,7 +24,8 @@ A **client** is a taxpayer serviced by the organisation; a **user** is a staff m
 | 0 | Architecture, ERD, PRD/SRS, UI/UX spec, API contracts, backlog | Done (this folder) |
 | 1 | Login, users/roles, dashboard, clients + onboarding, document upload/storage, audit log | Done (in `develop`) |
 | 2A | CoA + template, periods, journals with maker-checker, reversal, GL, trial balance, P&L, balance sheet | Done (branch `feature`) |
-| 2B | Bank reconciliation, sales/purchase invoices, vendor/customer masters, cash flow, recurring journals, year-end close, PDF/Excel | Planned |
+| 2B.1 | Letterhead + approval policy, customers/vendors, GST invoices, bank statement import and reconciliation | Done (branch `feature`) |
+| 2B.2 | Cash flow, recurring journals, year-end close, credit/debit notes, ageing, PDF/Excel | Planned |
 | 3 | GST engine: registrations, registers, GSTR-1, GSTR-2B reconciliation, ITC, GSTR-3B | Planned |
 | 4 | Income-tax engine: taxpayer profiles, AIS/TIS/26AS, Form 16, computation, regimes, ITR drafts | Planned |
 | 5 | TDS/TCS, AP, AR, fixed assets, inventory, compliance calendar | Planned |
