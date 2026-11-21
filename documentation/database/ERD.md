@@ -39,6 +39,34 @@ erDiagram
     audit_logs { uuid id PK; timestamptz occurred_at; uuid actor_user_id; text actor_email; text action; text entity_type; uuid entity_id; uuid client_id; jsonb details; inet ip_address; text request_id }
 ```
 
+## Phase 2A — accounting (V6, V7)
+
+```mermaid
+erDiagram
+    clients ||--o{ ledger_accounts : "chart of accounts"
+    ledger_accounts ||--o{ ledger_accounts : "parent group"
+    clients ||--o{ accounting_periods : "monthly periods"
+    clients ||--o{ journal_entries : books
+    accounting_periods ||--o{ journal_entries : contains
+    journal_entries ||--|{ journal_entry_lines : has
+    ledger_accounts ||--o{ journal_entry_lines : "posted to"
+    journal_entries |o--o| journal_entries : "reversal of"
+    clients ||--o{ journal_sequences : numbering
+
+    ledger_accounts { uuid id PK; uuid client_id FK; text code UK; text name; text account_type; text subtype; uuid parent_id FK; bool is_group; bool active; text template_code }
+    accounting_periods { uuid id PK; uuid client_id FK; text financial_year; smallint period_number; date start_date; date end_date; text status }
+    journal_entries { uuid id PK; uuid client_id FK; text entry_number UK; date entry_date; uuid period_id FK; text entry_type; text status; numeric total_debit; numeric total_credit; uuid prepared_by; uuid approved_by; uuid posted_by; uuid reversal_of_id; uuid reversed_by_id; text idempotency_key UK }
+    journal_entry_lines { uuid id PK; uuid journal_entry_id FK; smallint line_no; uuid account_id FK; numeric debit; numeric credit }
+    journal_sequences { uuid client_id PK; text financial_year PK; int next_value }
+```
+
+Accounting integrity (database triggers, in addition to application checks):
+- A line has exactly one non-zero side; amounts are `NUMERIC(19,2)` and never negative.
+- Posting requires ≥ 2 lines, total debit = total credit > 0, totals matching the lines, only active non-group
+  accounts of the same client, and an OPEN period containing the entry date.
+- Posted entries cannot be deleted or changed (only `reversed_by_id` may be set once); their lines are frozen.
+- Voucher numbers are allocated per client and financial year inside the posting transaction (no gaps).
+
 ## Integrity rules
 
 - `audit_logs` is **append-only**: a trigger rejects `UPDATE` and `DELETE`.
