@@ -296,7 +296,7 @@ public class ReconciliationService {
 
     /** Creates a DRAFT journal for an unmatched bank line (e.g. bank charges). It must be approved and posted. */
     @Transactional
-    public UUID createJournal(UUID txnId, UUID counterAccountId, String narration) {
+    public UUID createJournal(UUID txnId, UUID counterAccountId, String narration, UUID partyId) {
         Transaction t = findTxn(txnId);
         requireInProgress(findImport(t.getImportId()));
         if (t.getStatus() != Transaction.Status.UNMATCHED) throw ApiException.conflict("ALREADY_RESOLVED", "This bank line is already resolved");
@@ -304,7 +304,7 @@ public class ReconciliationService {
         JournalLineRequest bankLine = new JournalLineRequest(t.getLedgerAccountId(), t.isDeposit() ? amount : null,
                 t.isDeposit() ? null : amount, "As per bank statement");
         JournalLineRequest counter = new JournalLineRequest(counterAccountId, t.isDeposit() ? null : amount,
-                t.isDeposit() ? amount : null, null);
+                t.isDeposit() ? amount : null, null, partyId);
         String text = narration == null || narration.isBlank() ? t.getDescription() : narration.trim();
         JournalRequest req = new JournalRequest(t.getClientId(), t.getTxnDate(), null,
                 text.length() > 1000 ? text.substring(0, 1000) : text, t.getReference(), List.of(bankLine, counter), null);

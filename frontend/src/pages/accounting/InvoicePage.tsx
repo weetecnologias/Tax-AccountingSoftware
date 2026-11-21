@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FileDown, FileMinus, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -10,11 +10,12 @@ import { ConfirmDialog, DetailList, ErrorState, PageHeader, Skeleton, StatusBadg
 import { Badge, Button, Card, CardHeader, Field, Input, Select, Table, Td, Textarea, Th } from "@/components/ui";
 import { useAccounts } from "@/hooks/useAccounting";
 import { useStates } from "@/hooks/useReference";
-import { ApiError, api, request } from "@/lib/api";
+import { ApiError, api, downloadFile, request } from "@/lib/api";
 import { applyServerErrors, nullIfBlank } from "@/lib/forms";
 import { formatINR, gstLinePreview, paiseToString } from "@/lib/money";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import type { GstRegistration } from "@/types/api";
+import { INVOICE_TYPE_LABEL } from "@/types/accounting";
 import type { GstRate, Invoice, InvoiceType } from "@/types/accounting";
 import { useParties } from "./PartiesTab";
 
@@ -23,14 +24,25 @@ export function InvoicePage() {
   const [params] = useSearchParams();
   const [editing, setEditing] = useState(false);
   const inv = useQuery({ queryKey: ["accounting", "invoice", id], queryFn: () => api.get<Invoice>(`/invoices/${id}`), enabled: !!id });
+  const originalId = id ? inv.data?.originalInvoiceId ?? null : params.get("original");
+  const original = useQuery({ queryKey: ["accounting", "invoice", originalId], queryFn: () => api.get<Invoice>(`/invoices/${originalId}`), enabled: !!originalId });
   if (id && inv.isError) return <ErrorState error={inv.error} onRetry={() => inv.refetch()} />;
   if (id && inv.isPending) return <Skeleton className="h-96" />;
   const clientId = id ? inv.data!.clientId : params.get("clientId");
   const type = (id ? inv.data!.invoiceType : params.get("type") ?? "SALES") as InvoiceType;
   if (!clientId) return <ErrorState error={new Error("Choose a client from the Accounting page first.")} />;
-  if (!id || editing) return <InvoiceEditor clientId={clientId} type={type} existing={inv.data ?? null} onDone={() => setEditing(false)} />;
+  const isNote = type === "CREDIT_NOTE" || type === "DEBIT_NOTE";
+  if ((!id || editing) && isNote) {
+    if (!originalId) return <ErrorState error={new Error("A credit or debit note must be raised from a posted invoice.")} />;
+    if (original.isError) return <ErrorState error={original.error} onRetry={() => original.refetch()} />;
+    if (original.isPending) return <Skeleton className="h-96" />;
+  }
+  if (!id || editing) return <InvoiceEditor clientId={clientId} type={type} existing={inv.data ?? null} original={original.data ?? null} onDone={() => setEditing(false)} />;
   return <InvoiceView invoice={inv.data!} onEdit={() => setEditing(true)} />;
 }
+
+/** Inherited from the original on a note: shown but not editable (a disabled field would drop out of the form values). */
+const LOCKED = { tabIndex: -1, "aria-readonly": true, className: "pointer-events-none bg-page text-muted" } as const;
 
 const lineSchema = z.object({
   description: z.string().trim().min(1, "Required").max(300),
@@ -49,14 +61,20 @@ const schema = z.object({
   reverseCharge: z.boolean(),
   supplierInvoiceNumber: z.string().max(16),
   notes: z.string().max(1000),
+  noteReason: z.string().max(500),
   lines: z.array(lineSchema).min(1),
 });
 type Values = z.infer<typeof schema>;
 
-function InvoiceEditor({ clientId, type, existing, onDone }: { clientId: string; type: InvoiceType; existing: Invoice | null; onDone: () => void }) {
+function InvoiceEditor({ clientId, type, existing, original, onDone }: {
+  clientId: string; type: InvoiceType; existing: Invoice | null; original: Invoice | null; onDone: () => void;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const sales = type === "SALES";
+  // Credit notes sit on the sales side, debit notes on the purchase side.
+  const sales = type === "SALES" || type === "CREDIT_NOTE";
+  const note = type === "CREDIT_NOTE" || type === "DEBIT_NOTE";
+  const noteLabel = type === "CREDIT_NOTE" ? "credit note" : "debit note";
   const parties = useParties(clientId);
   const accounts = useAccounts(clientId);
   const states = useStates();
@@ -69,11 +87,18 @@ function InvoiceEditor({ clientId, type, existing, onDone }: { clientId: string;
     defaultValues: existing ? {
       invoiceDate: existing.invoiceDate, dueDate: existing.dueDate ?? "", partyId: existing.partyId,
       gstRegistrationId: existing.gstRegistrationId ?? "", placeOfSupply: existing.placeOfSupply, reverseCharge: existing.reverseCharge,
-      supplierInvoiceNumber: existing.supplierInvoiceNumber ?? "", notes: existing.notes ?? "",
+      supplierInvoiceNumber: existing.supplierInvoiceNumber ?? "", notes: existing.notes ?? "", noteReason: existing.noteReason ?? "",
       lines: existing.lines.map((l) => ({ description: l.description, hsnSac: l.hsnSac ?? "", accountId: l.accountId,
         quantity: l.quantity, unitPrice: l.unitPrice, gstRate: l.gstRate })),
+    } : original ? {
+      // A new note starts as a copy of the original's lines; reduce the quantities or rates to what is being credited or debited.
+      invoiceDate: new Date().toISOString().slice(0, 10) < original.invoiceDate ? original.invoiceDate : new Date().toISOString().slice(0, 10),
+      dueDate: "", partyId: original.partyId, gstRegistrationId: original.gstRegistrationId ?? "", placeOfSupply: original.placeOfSupply,
+      reverseCharge: original.reverseCharge, supplierInvoiceNumber: "", notes: "", noteReason: "",
+      lines: original.lines.map((l) => ({ description: l.description, hsnSac: l.hsnSac ?? "", accountId: l.accountId,
+        quantity: l.quantity, unitPrice: l.unitPrice, gstRate: l.gstRate })),
     } : { invoiceDate: new Date().toISOString().slice(0, 10), dueDate: "", partyId: "", gstRegistrationId: "", placeOfSupply: "",
-      reverseCharge: false, supplierInvoiceNumber: "", notes: "", lines: [{ description: "", hsnSac: "", accountId: "", quantity: "1", unitPrice: "", gstRate: "18" }] },
+      reverseCharge: false, supplierInvoiceNumber: "", notes: "", noteReason: "", lines: [{ description: "", hsnSac: "", accountId: "", quantity: "1", unitPrice: "", gstRate: "18" }] },
   });
   const { register, control, handleSubmit, formState, setError, setValue } = form;
   const { fields, append, remove } = useFieldArray({ control, name: "lines" });
@@ -117,7 +142,8 @@ function InvoiceEditor({ clientId, type, existing, onDone }: { clientId: string;
       const body = {
         clientId, invoiceType: type, invoiceDate: v.invoiceDate, dueDate: nullIfBlank(v.dueDate), partyId: v.partyId,
         gstRegistrationId: nullIfBlank(v.gstRegistrationId) ?? reg?.id ?? null, placeOfSupply: nullIfBlank(v.placeOfSupply),
-        reverseCharge: !sales && v.reverseCharge, supplierInvoiceNumber: sales ? null : nullIfBlank(v.supplierInvoiceNumber),
+        reverseCharge: !sales && v.reverseCharge, supplierInvoiceNumber: sales || note ? null : nullIfBlank(v.supplierInvoiceNumber),
+        originalInvoiceId: note ? (existing?.originalInvoiceId ?? original?.id ?? null) : null, noteReason: note ? nullIfBlank(v.noteReason) : null,
         notes: nullIfBlank(v.notes), lines: v.lines.map((l) => ({ ...l, unitPrice: l.unitPrice.replace(/,/g, ""), hsnSac: nullIfBlank(l.hsnSac) })),
         version: existing?.version,
       };
@@ -135,45 +161,54 @@ function InvoiceEditor({ clientId, type, existing, onDone }: { clientId: string;
         const m = /^lines\[(\d+)\]\.(\w+)$/.exec(fe.field);
         if (m) setError(`lines.${Number(m[1])}.${m[2] as "description"}`, { message: fe.message });
       }
-      applyServerErrors(err, setError, ["invoiceDate", "dueDate", "partyId", "gstRegistrationId", "placeOfSupply", "supplierInvoiceNumber", "reverseCharge", "lines"]);
+      applyServerErrors(err, setError, ["invoiceDate", "dueDate", "partyId", "gstRegistrationId", "placeOfSupply", "supplierInvoiceNumber", "reverseCharge", "noteReason", "lines"]);
     },
   });
 
   return (
     <div>
-      <PageHeader title={existing ? "Edit draft invoice" : `New ${sales ? "sales" : "purchase"} invoice`}
-        description={sales ? "The invoice number is assigned when the invoice is approved." : "Record the supplier's invoice exactly as received."}
+      <PageHeader title={note ? `${existing ? "Edit draft" : "New"} ${noteLabel} against ${original?.invoiceNumber ?? original?.supplierInvoiceNumber ?? ""}`
+          : existing ? "Edit draft invoice" : `New ${sales ? "sales" : "purchase"} invoice`}
+        description={note ? `Customer, GSTIN, place of supply and reverse charge follow the original invoice. Up to ₹${formatINR(original?.noteableBalance ?? "0")} can still be ${type === "CREDIT_NOTE" ? "credited" : "debited"}.`
+          : sales ? "The invoice number is assigned when the invoice is approved." : "Record the supplier's invoice exactly as received."}
         actions={<Button variant="secondary" onClick={() => (existing ? onDone() : navigate(-1))}><ArrowLeft className="h-4 w-4" /> Back</Button>} />
-      <form onSubmit={handleSubmit((v) => save.mutate(v))} noValidate className="space-y-5">
+      <form onSubmit={handleSubmit((v) => {
+        if (note && !v.noteReason.trim()) { setError("noteReason", { message: "Give the reason for the note" }); return; }
+        save.mutate(v);
+      })} noValidate className="space-y-5">
         <Card>
           <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
             <Field label={sales ? "Customer" : "Vendor"} htmlFor="i-party" required error={e.partyId?.message}>
-              <Select id="i-party" {...register("partyId")} aria-invalid={!!e.partyId}>
+              <Select id="i-party" {...register("partyId")} aria-invalid={!!e.partyId} {...(note ? LOCKED : {})}>
                 <option value="">Choose…</option>
                 {eligibleParties.map((p) => <option key={p.id} value={p.id}>{p.name}{p.gstin ? ` · ${p.gstin}` : ""}</option>)}
               </Select>
             </Field>
-            <Field label="Invoice date" htmlFor="i-date" required error={e.invoiceDate?.message}><Input id="i-date" type="date" {...register("invoiceDate")} aria-invalid={!!e.invoiceDate} /></Field>
+            <Field label={note ? "Note date" : "Invoice date"} htmlFor="i-date" required error={e.invoiceDate?.message}><Input id="i-date" type="date" min={original?.invoiceDate} {...register("invoiceDate")} aria-invalid={!!e.invoiceDate} /></Field>
             <Field label="Due date" htmlFor="i-due" error={e.dueDate?.message} hint={party ? `Default: +${party.creditDays} days` : undefined}><Input id="i-due" type="date" {...register("dueDate")} /></Field>
             <Field label={sales ? "Issued from GSTIN" : "Received at GSTIN"} htmlFor="i-reg" error={e.gstRegistrationId?.message}
               hint={!sales ? "Leave blank if input tax credit cannot be claimed (tax is added to cost)" : undefined}>
-              <Select id="i-reg" {...register("gstRegistrationId")} aria-invalid={!!e.gstRegistrationId}>
+              <Select id="i-reg" {...register("gstRegistrationId")} aria-invalid={!!e.gstRegistrationId} {...(note ? LOCKED : {})}>
                 {(!sales || activeRegs.length !== 1) && <option value="">{sales ? "Choose…" : "No ITC (not registered)"}</option>}
                 {activeRegs.map((r) => <option key={r.id} value={r.id}>{r.gstin} · {r.stateName}</option>)}
               </Select>
             </Field>
             <Field label="Place of supply" htmlFor="i-pos" error={e.placeOfSupply?.message} hint={pos ? (inter ? "Inter-state → IGST" : "Intra-state → CGST + SGST") : undefined}>
-              <Select id="i-pos" {...register("placeOfSupply")}>
+              <Select id="i-pos" {...register("placeOfSupply")} {...(note ? LOCKED : {})}>
                 <option value="">{pos ? `Auto (${states.data?.find((s) => s.value === pos)?.label ?? pos})` : "Choose…"}</option>
                 {states.data?.map((s) => <option key={s.value} value={s.value}>{s.value} · {s.label}</option>)}
               </Select>
             </Field>
-            {!sales ? (
+            {note ? (
+              <Field label="Reason" htmlFor="i-reason" required error={e.noteReason?.message} hint="e.g. goods returned, rate difference, short supply">
+                <Input id="i-reason" maxLength={500} {...register("noteReason")} aria-invalid={!!e.noteReason} />
+              </Field>
+            ) : !sales ? (
               <Field label="Supplier invoice number" htmlFor="i-supno" required error={e.supplierInvoiceNumber?.message}>
                 <Input id="i-supno" maxLength={16} {...register("supplierInvoiceNumber")} aria-invalid={!!e.supplierInvoiceNumber} />
               </Field>
             ) : <div />}
-            {!sales && (
+            {!sales && !note && (
               <label className="flex items-center gap-2 text-sm md:col-span-3">
                 <input type="checkbox" {...register("reverseCharge")} className="h-4 w-4 accent-emerald" onChange={(ev) => setValue("reverseCharge", ev.target.checked)} />
                 Reverse charge applies (tax payable by us under RCM)
@@ -250,8 +285,22 @@ const META = {
 
 function InvoiceView({ invoice: i, onEdit }: { invoice: Invoice; onEdit: () => void }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [pending, setPending] = useState<keyof typeof META | null>(null);
-  const sales = i.invoiceType === "SALES";
+  const [downloading, setDownloading] = useState(false);
+  const sales = i.invoiceType === "SALES" || i.invoiceType === "CREDIT_NOTE";
+  const note = i.invoiceType === "CREDIT_NOTE" || i.invoiceType === "DEBIT_NOTE";
+  const label = INVOICE_TYPE_LABEL[i.invoiceType];
+  const pdf = async () => {
+    setDownloading(true);
+    try {
+      await downloadFile(`/invoices/${i.id}/pdf`, `${i.invoiceNumber ?? "draft"}.pdf`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  };
   const run = async (reason: string) => {
     const updated = await api.post<Invoice>(`/invoices/${i.id}/${pending!.toLowerCase()}`, pending === "REJECT" ? { reason } : undefined);
     queryClient.setQueryData(["accounting", "invoice", i.id], updated);
@@ -260,18 +309,27 @@ function InvoiceView({ invoice: i, onEdit }: { invoice: Invoice; onEdit: () => v
   };
   return (
     <div>
-      <PageHeader title={(sales ? i.invoiceNumber : i.supplierInvoiceNumber) ?? `Draft ${sales ? "sales" : "purchase"} invoice`}
-        description={`${sales ? "Sales invoice to" : "Purchase invoice from"} ${i.partyName} · ${formatDate(i.invoiceDate)}`}
-        actions={<Link to={`/accounting?clientId=${i.clientId}&tab=invoices`}><Button variant="secondary"><ArrowLeft className="h-4 w-4" /> Invoices</Button></Link>} />
+      <PageHeader title={(i.invoiceType !== "PURCHASE" ? i.invoiceNumber : i.supplierInvoiceNumber) ?? `Draft ${label.toLowerCase()}`}
+        description={`${label} ${sales ? "to" : "from"} ${i.partyName} · ${formatDate(i.invoiceDate)}`}
+        actions={<div className="flex gap-2">
+          {i.invoiceType !== "PURCHASE" && <Button variant="secondary" loading={downloading} onClick={pdf}><FileDown className="h-4 w-4" /> {i.status === "POSTED" ? "PDF" : "Draft PDF"}</Button>}
+          <Link to={`/accounting?clientId=${i.clientId}&tab=invoices`}><Button variant="secondary"><ArrowLeft className="h-4 w-4" /> Invoices</Button></Link>
+        </div>} />
       <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={i.status} />
           {i.reverseCharge && <Badge tone="warning">Reverse charge</Badge>}
           {i.selfApproved && <Badge tone="warning">Self-approved</Badge>}
           {i.journalEntryId && <Link to={`/accounting/journals/${i.journalEntryId}`} className="text-sm text-emerald hover:underline">Journal {i.journalNumber}</Link>}
+          {i.originalInvoiceId && <Link to={`/accounting/invoices/${i.originalInvoiceId}`} className="text-sm text-emerald hover:underline">Against {i.originalNumber}</Link>}
         </div>
         <div className="flex flex-wrap gap-2">
           {i.allowedActions.includes("EDIT") && <Button size="sm" variant="secondary" onClick={onEdit}>Edit</Button>}
+          {(["CREDIT_NOTE", "DEBIT_NOTE"] as const).filter((a) => i.allowedActions.includes(a)).map((a) => (
+            <Button key={a} size="sm" variant="secondary" onClick={() => navigate(`/accounting/invoices/new?clientId=${i.clientId}&type=${a}&original=${i.id}`)}>
+              <FileMinus className="h-4 w-4" /> Raise {a === "CREDIT_NOTE" ? "credit" : "debit"} note
+            </Button>
+          ))}
           {(["SUBMIT", "APPROVE", "REJECT", "CANCEL"] as const).filter((a) => i.allowedActions.includes(a)).map((a) => (
             <Button key={a} size="sm" variant={a === "REJECT" || a === "CANCEL" ? "secondary" : META[a].tone}
               className={a === "REJECT" || a === "CANCEL" ? "text-danger" : undefined} onClick={() => setPending(a)}>{META[a].label}</Button>
@@ -284,8 +342,10 @@ function InvoiceView({ invoice: i, onEdit }: { invoice: Invoice; onEdit: () => v
           { label: sales ? "Customer" : "Vendor", value: <>{i.partyName}{i.partyGstin && <span className="block font-mono text-xs text-muted">{i.partyGstin}</span>}</> },
           { label: sales ? "Issued from" : "Received at", value: i.gstin ? <span className="font-mono">{i.gstin}</span> : "Not registered (no ITC)" },
           { label: "Place of supply", value: `${i.placeOfSupply} · ${i.placeOfSupplyName ?? ""} (${i.supplyType === "INTRA" ? "intra-state" : "inter-state"})` },
-          { label: "Invoice date", value: formatDate(i.invoiceDate) },
-          { label: "Due date", value: formatDate(i.dueDate) },
+          { label: note ? "Note date" : "Invoice date", value: formatDate(i.invoiceDate) },
+          ...(note ? [{ label: "Reason", value: i.noteReason ?? "" }] : [{ label: "Due date", value: formatDate(i.dueDate) }]),
+          ...(!note && i.status === "POSTED" && i.notesPostedTotal !== "0.00" ? [{ label: sales ? "Credit notes posted" : "Debit notes posted",
+            value: `₹${formatINR(i.notesPostedTotal)} · ₹${formatINR(i.noteableBalance)} remaining` }] : []),
           { label: "Prepared by", value: `${i.preparedBy?.fullName ?? ""} · ${formatDateTime(i.createdAt)}` },
           ...(i.approvedBy ? [{ label: "Approved & posted by", value: `${i.approvedBy.fullName} · ${formatDateTime(i.approvedAt)}` }] : []),
         ]} />

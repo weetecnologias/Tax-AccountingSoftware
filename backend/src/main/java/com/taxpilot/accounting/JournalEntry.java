@@ -29,7 +29,7 @@ public class JournalEntry extends BaseEntity {
 
     public enum Status { DRAFT, PENDING_APPROVAL, APPROVED, POSTED, CANCELLED }
 
-    public enum Type { GENERAL, OPENING, ADJUSTMENT, REVERSAL }
+    public enum Type { GENERAL, OPENING, ADJUSTMENT, REVERSAL, CLOSING }
 
     @Column(name = "organisation_id", nullable = false, updatable = false)
     private UUID organisationId = Organisations.DEFAULT_ID;
@@ -87,6 +87,13 @@ public class JournalEntry extends BaseEntity {
 
     @Column(name = "idempotency_key", updatable = false)
     private String idempotencyKey;
+
+    /** Set on year-end CLOSING entries: the financial year being closed. */
+    @Column(name = "closing_financial_year", updatable = false)
+    private String closingFinancialYear;
+
+    public String getClosingFinancialYear() { return closingFinancialYear; }
+    public void setClosingFinancialYear(String fy) { this.closingFinancialYear = fy; }
 
     @Version
     private long version;

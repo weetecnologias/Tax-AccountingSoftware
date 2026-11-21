@@ -28,7 +28,23 @@ import jakarta.persistence.Version;
 @Table(name = "invoices")
 public class Invoice extends BaseEntity {
 
-    public enum Type { SALES, PURCHASE }
+    /** CREDIT_NOTE reduces a posted SALES invoice; DEBIT_NOTE (issued to a vendor) reduces a posted PURCHASE invoice. */
+    public enum Type {
+        SALES, PURCHASE, CREDIT_NOTE, DEBIT_NOTE;
+
+        public boolean salesSide() {
+            return this == SALES || this == CREDIT_NOTE;
+        }
+
+        public boolean isNote() {
+            return this == CREDIT_NOTE || this == DEBIT_NOTE;
+        }
+
+        /** Outward documents numbered by us (purchase invoices keep the supplier's number). */
+        public boolean numberedByUs() {
+            return this != PURCHASE;
+        }
+    }
 
     public enum Status { DRAFT, PENDING_APPROVAL, POSTED, CANCELLED }
 
@@ -62,6 +78,16 @@ public class Invoice extends BaseEntity {
     @Column(name = "self_approved", nullable = false) private boolean selfApproved;
     @Column(name = "rejection_reason") private String rejectionReason;
     @Column(name = "idempotency_key", updatable = false) private String idempotencyKey;
+    @Column(name = "original_invoice_id", updatable = false) private UUID originalInvoiceId;
+    @Column(name = "note_reason") private String noteReason;
+
+    public UUID getOriginalInvoiceId() { return originalInvoiceId; }
+    public String getNoteReason() { return noteReason; }
+
+    void setNote(UUID originalInvoiceId, String reason) {
+        this.originalInvoiceId = originalInvoiceId;
+        this.noteReason = reason;
+    }
     @Version private long version;
 
     @OneToMany(mappedBy = "invoice", cascade = CascadeType.ALL, orphanRemoval = true)

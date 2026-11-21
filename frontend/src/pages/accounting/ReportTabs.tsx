@@ -1,26 +1,53 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Download, XCircle } from "lucide-react";
+import { CheckCircle2, Download, FileSpreadsheet, FileText, XCircle } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { EmptyState, ErrorState, Skeleton } from "@/components/common";
 import { Button, Card, Field, Input, Select, Table, Td, Th } from "@/components/ui";
 import { currentYearRange, postableAccounts, useAccounts, usePeriods } from "@/hooks/useAccounting";
-import { api, qs } from "@/lib/api";
+import { toast } from "sonner";
+import { api, downloadFile, qs } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
 import { formatINR } from "@/lib/money";
 import { formatDate, formatDateTime, humanize } from "@/lib/utils";
-import type { BalanceSheet, GeneralLedger, ProfitAndLoss, ReportHeader, StatementSection, TrialBalance } from "@/types/accounting";
+import type { BalanceSheet, ExportReport, GeneralLedger, ProfitAndLoss, ReportHeader, StatementSection, TrialBalance } from "@/types/accounting";
 
-const amt = "text-right font-mono tabular-nums whitespace-nowrap";
+export const amt = "text-right font-mono tabular-nums whitespace-nowrap";
 
-function ReportFrame({ header, title, controls, onExport, children }: {
-  header?: ReportHeader; title: string; controls: ReactNode; onExport?: () => void; children: ReactNode;
+export type ExportSpec = { report: ExportReport; params: Record<string, string | null | undefined> };
+
+/** PDF / Excel downloads rendered by the server on the firm letterhead (each export is audited). */
+export function ExportButtons({ clientId, spec }: { clientId: string; spec: ExportSpec }) {
+  const [busy, setBusy] = useState<"pdf" | "xlsx" | null>(null);
+  const run = async (format: "pdf" | "xlsx") => {
+    setBusy(format);
+    try {
+      await downloadFile(`/accounting/export${qs({ report: spec.report, format, clientId, ...spec.params })}`, `${spec.report.toLowerCase()}.${format}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <>
+      <Button variant="secondary" size="sm" loading={busy === "pdf"} onClick={() => run("pdf")}><FileText className="h-4 w-4" /> PDF</Button>
+      <Button variant="secondary" size="sm" loading={busy === "xlsx"} onClick={() => run("xlsx")}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
+    </>
+  );
+}
+
+export function ReportFrame({ header, title, controls, onExport, exportSpec, children }: {
+  header?: ReportHeader; title: string; controls: ReactNode; onExport?: () => void; exportSpec?: ExportSpec; children: ReactNode;
 }) {
   return (
     <Card>
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line p-4">
         <div className="flex flex-wrap items-end gap-3">{controls}</div>
-        {onExport && <Button variant="secondary" size="sm" onClick={onExport}><Download className="h-4 w-4" /> Export CSV</Button>}
+        <div className="flex flex-wrap gap-2">
+          {header && exportSpec && <ExportButtons clientId={header.clientId} spec={exportSpec} />}
+          {onExport && <Button variant="secondary" size="sm" onClick={onExport}><Download className="h-4 w-4" /> CSV</Button>}
+        </div>
       </div>
       {header && (
         <div className="border-b border-line px-5 py-3 text-center">
@@ -29,7 +56,9 @@ function ReportFrame({ header, title, controls, onExport, children }: {
             {header.preparedBy.gstin ? ` · GSTIN ${header.preparedBy.gstin}` : ""}
           </p>
           <p className="font-semibold text-primary">{header.clientName} <span className="font-mono text-xs text-muted">{header.clientCode}</span></p>
-          <p className="text-sm">{title} {header.from ? `for ${formatDate(header.from)} to ${formatDate(header.to)}` : `as at ${formatDate(header.to)}`}</p>
+          <p className="text-sm">{title} {header.from ? `for ${formatDate(header.from)} to ${formatDate(header.to)}` : `as at ${formatDate(header.to)}`}
+            {header.compareFrom ? ` · compared with ${formatDate(header.compareFrom)} to ${formatDate(header.compareTo)}`
+              : header.compareTo ? ` · compared with ${formatDate(header.compareTo)}` : ""}</p>
           <p className="text-xs text-muted">{header.basis} · generated {formatDateTime(header.generatedAt)} · amounts in ₹</p>
         </div>
       )}
@@ -39,7 +68,7 @@ function ReportFrame({ header, title, controls, onExport, children }: {
   );
 }
 
-function BalanceCheck({ ok, label, difference }: { ok: boolean; label: string; difference?: string }) {
+export function BalanceCheck({ ok, label, difference }: { ok: boolean; label: string; difference?: string }) {
   return ok ? (
     <p className="flex items-center gap-1.5 px-5 py-3 text-sm text-emerald"><CheckCircle2 className="h-4 w-4" /> {label}</p>
   ) : (
@@ -47,7 +76,7 @@ function BalanceCheck({ ok, label, difference }: { ok: boolean; label: string; d
   );
 }
 
-function useRange(clientId: string) {
+export function useRange(clientId: string) {
   const periods = usePeriods(clientId);
   const def = currentYearRange(periods.data);
   const [from, setFrom] = useState<string | null>(null);
@@ -66,7 +95,7 @@ export function TrialBalanceTab({ clientId }: { clientId: string }) {
   });
   const d = q.data;
   return (
-    <ReportFrame header={d?.header} title="Trial balance"
+    <ReportFrame header={d?.header} title="Trial balance" exportSpec={{ report: "TRIAL_BALANCE", params: { asOf: r.to } }}
       controls={<Field label="As at" htmlFor="tb-asof"><Input id="tb-asof" type="date" value={r.to} onChange={(e) => r.setTo(e.target.value)} /></Field>}
       onExport={d ? () => downloadCsv(`trial-balance-${r.to}.csv`, ["Code", "Account", "Group", "Debit", "Credit"],
         [...d.rows.map((x) => [x.code, x.name, x.groupName, x.debit, x.credit]), ["", "Total", "", d.totalDebit, d.totalCredit]]) : undefined}>
@@ -97,62 +126,96 @@ export function TrialBalanceTab({ clientId }: { clientId: string }) {
 
 // ------------------------------------------------------------------ statements
 
-function Sections({ sections, emptyLabel }: { sections: StatementSection[]; emptyLabel: string }) {
-  if (sections.length === 0) return <tr><Td colSpan={2} className="text-muted">{emptyLabel}</Td></tr>;
+function Sections({ sections, emptyLabel, compare }: { sections: StatementSection[]; emptyLabel: string; compare: boolean }) {
+  if (sections.length === 0) return <tr><Td colSpan={compare ? 3 : 2} className="text-muted">{emptyLabel}</Td></tr>;
   return (
     <>
       {sections.map((s) => (
-        <SectionRows key={s.title} section={s} />
+        <SectionRows key={s.title} section={s} compare={compare} />
       ))}
     </>
   );
 }
 
-function SectionRows({ section }: { section: StatementSection }) {
+function SectionRows({ section, compare }: { section: StatementSection; compare: boolean }) {
   return (
     <>
-      <tr><Td colSpan={2} className="pt-4 font-medium text-primary">{section.title}</Td></tr>
+      <tr><Td colSpan={compare ? 3 : 2} className="pt-4 font-medium text-primary">{section.title}</Td></tr>
       {section.lines.map((l) => (
-        <tr key={l.accountId}><Td className="pl-8">{l.code} · {l.name}</Td><Td className={amt}>{formatINR(l.amount)}</Td></tr>
+        <tr key={l.accountId}><Td className="pl-8">{l.code} · {l.name}</Td><Td className={amt}>{formatINR(l.amount)}</Td>
+          {compare && <Td className={`${amt} text-muted`}>{formatINR(l.previous)}</Td>}</tr>
       ))}
-      <tr><Td className="pl-8 text-muted">Total {section.title.toLowerCase()}</Td><Td className={`${amt} text-muted`}>{formatINR(section.total)}</Td></tr>
+      <tr><Td className="pl-8 text-muted">Total {section.title}</Td><Td className={`${amt} text-muted`}>{formatINR(section.total)}</Td>
+        {compare && <Td className={`${amt} text-muted`}>{formatINR(section.previousTotal)}</Td>}</tr>
     </>
   );
 }
+
+/** Same dates one year earlier (29 Feb falls back to 28 Feb). */
+export function yearEarlier(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const last = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
+  return `${y - 1}-${String(m).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}
+
+function CompareToggle({ id, checked, onChange }: { id: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label htmlFor={id} className="flex items-center gap-2 pb-2 text-sm">
+      <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-emerald" />
+      Compare with previous year
+    </label>
+  );
+}
+
+const Row = ({ label, value, previous, compare, className, labelClass }: {
+  label: ReactNode; value: string | null; previous?: string | null; compare: boolean; className?: string; labelClass?: string;
+}) => (
+  <tr className={className}><Td className={labelClass}>{label}</Td><Td className={amt}>{formatINR(value)}</Td>
+    {compare && <Td className={`${amt} opacity-75`}>{formatINR(previous ?? null)}</Td>}</tr>
+);
+
+const CompareHead = ({ compare, current, previous }: { compare: boolean; current: string; previous: string }) =>
+  compare ? <thead><tr><Th>Particulars</Th><Th className="text-right">{current}</Th><Th className="text-right">{previous}</Th></tr></thead> : null;
 
 const sectionCsv = (heading: string, sections: StatementSection[]) =>
   sections.flatMap((s) => [[heading, s.title, "", ""], ...s.lines.map((l) => [heading, s.title, `${l.code} ${l.name}`, l.amount])]);
 
 export function ProfitLossTab({ clientId }: { clientId: string }) {
   const r = useRange(clientId);
+  const [compare, setCompare] = useState(false);
+  const cmp = compare ? { compareFrom: yearEarlier(r.from), compareTo: yearEarlier(r.to) } : {};
   const q = useQuery({
-    queryKey: ["accounting", clientId, "pl", r.from, r.to],
-    queryFn: () => api.get<ProfitAndLoss>(`/accounting/profit-loss${qs({ clientId, from: r.from, to: r.to })}`),
+    queryKey: ["accounting", clientId, "pl", r.from, r.to, compare],
+    queryFn: () => api.get<ProfitAndLoss>(`/accounting/profit-loss${qs({ clientId, from: r.from, to: r.to, ...cmp })}`),
     enabled: r.ready && r.from <= r.to,
   });
   const d = q.data;
   const profit = d && !d.netProfit.startsWith("-");
+  const c = compare && !!d?.previousNetProfit;
   return (
     <ReportFrame header={d?.header} title="Statement of profit and loss"
+      exportSpec={{ report: "PROFIT_LOSS", params: { from: r.from, to: r.to, ...cmp } }}
       controls={<>
         <Field label="From" htmlFor="pl-from"><Input id="pl-from" type="date" value={r.from} onChange={(e) => r.setFrom(e.target.value)} /></Field>
         <Field label="To" htmlFor="pl-to"><Input id="pl-to" type="date" value={r.to} onChange={(e) => r.setTo(e.target.value)} /></Field>
+        <CompareToggle id="pl-compare" checked={compare} onChange={setCompare} />
       </>}
       onExport={d ? () => downloadCsv(`profit-and-loss-${r.from}-${r.to}.csv`, ["Section", "Group", "Account", "Amount"],
         [...sectionCsv("Income", d.income), ["Income", "Total", "", d.totalIncome], ...sectionCsv("Expenses", d.expenses),
           ["Expenses", "Total", "", d.totalExpenses], ["Net profit / (loss)", "", "", d.netProfit]]) : undefined}>
       {q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d ? <Skeleton className="m-4 h-40" /> : (
         <Table>
+          <CompareHead compare={c} current={`${formatDate(r.from)} – ${formatDate(r.to)}`}
+            previous={d.header.compareFrom ? `${formatDate(d.header.compareFrom)} – ${formatDate(d.header.compareTo)}` : ""} />
           <tbody>
-            <tr className="bg-page"><Td className="font-semibold">Income</Td><Td /></tr>
-            <Sections sections={d.income} emptyLabel="No income in this period" />
-            <tr className="font-semibold"><Td>Total income</Td><Td className={amt}>{formatINR(d.totalIncome)}</Td></tr>
-            <tr className="bg-page"><Td className="font-semibold">Expenses</Td><Td /></tr>
-            <Sections sections={d.expenses} emptyLabel="No expenses in this period" />
-            <tr className="font-semibold"><Td>Total expenses</Td><Td className={amt}>{formatINR(d.totalExpenses)}</Td></tr>
-            <tr className={profit ? "bg-mint font-semibold text-primary" : "bg-danger-soft font-semibold text-danger"}>
-              <Td>{profit ? "Net profit" : "Net loss"}</Td><Td className={amt}>{formatINR(d.netProfit.replace("-", ""))}</Td>
-            </tr>
+            <tr className="bg-page"><Td className="font-semibold" colSpan={c ? 3 : 2}>Income</Td></tr>
+            <Sections sections={d.income} emptyLabel="No income in this period" compare={c} />
+            <Row label="Total income" value={d.totalIncome} previous={d.previousTotalIncome} compare={c} className="font-semibold" />
+            <tr className="bg-page"><Td className="font-semibold" colSpan={c ? 3 : 2}>Expenses</Td></tr>
+            <Sections sections={d.expenses} emptyLabel="No expenses in this period" compare={c} />
+            <Row label="Total expenses" value={d.totalExpenses} previous={d.previousTotalExpenses} compare={c} className="font-semibold" />
+            <Row label={profit ? "Net profit" : "Net loss"} value={d.netProfit} previous={d.previousNetProfit} compare={c}
+              className={profit ? "bg-mint font-semibold text-primary" : "bg-danger-soft font-semibold text-danger"} />
           </tbody>
         </Table>
       )}
@@ -162,15 +225,22 @@ export function ProfitLossTab({ clientId }: { clientId: string }) {
 
 export function BalanceSheetTab({ clientId }: { clientId: string }) {
   const r = useRange(clientId);
+  const [compare, setCompare] = useState(false);
+  const cmp = compare ? { compareAsOf: yearEarlier(r.to) } : {};
   const q = useQuery({
-    queryKey: ["accounting", clientId, "bs", r.to],
-    queryFn: () => api.get<BalanceSheet>(`/accounting/balance-sheet${qs({ clientId, asOf: r.to })}`),
+    queryKey: ["accounting", clientId, "bs", r.to, compare],
+    queryFn: () => api.get<BalanceSheet>(`/accounting/balance-sheet${qs({ clientId, asOf: r.to, ...cmp })}`),
     enabled: r.ready,
   });
   const d = q.data;
+  const c = compare && !!d?.previousTotalAssets;
+  const heads = <CompareHead compare={c} current={formatDate(r.to)} previous={d?.header.compareTo ? formatDate(d.header.compareTo) : ""} />;
   return (
-    <ReportFrame header={d?.header} title="Balance sheet"
-      controls={<Field label="As at" htmlFor="bs-asof"><Input id="bs-asof" type="date" value={r.to} onChange={(e) => r.setTo(e.target.value)} /></Field>}
+    <ReportFrame header={d?.header} title="Balance sheet" exportSpec={{ report: "BALANCE_SHEET", params: { asOf: r.to, ...cmp } }}
+      controls={<>
+        <Field label="As at" htmlFor="bs-asof"><Input id="bs-asof" type="date" value={r.to} onChange={(e) => r.setTo(e.target.value)} /></Field>
+        <CompareToggle id="bs-compare" checked={compare} onChange={setCompare} />
+      </>}
       onExport={d ? () => downloadCsv(`balance-sheet-${r.to}.csv`, ["Section", "Group", "Account", "Amount"],
         [...sectionCsv("Equity", d.equity), ["Equity", "Profit / (loss) for the period", "", d.profitForPeriod], ["Equity", "Total", "", d.totalEquity],
           ...sectionCsv("Liabilities", d.liabilities), ["Liabilities", "Total", "", d.totalLiabilities],
@@ -179,21 +249,24 @@ export function BalanceSheetTab({ clientId }: { clientId: string }) {
         <>
           <div className="grid gap-0 lg:grid-cols-2 lg:divide-x lg:divide-line">
             <Table>
+              {heads}
               <tbody>
-                <tr className="bg-page"><Td className="font-semibold">Equity and liabilities</Td><Td /></tr>
-                <Sections sections={d.equity} emptyLabel="No equity balances" />
-                <tr><Td className="pl-8">Profit / (loss) for the period</Td><Td className={amt}>{formatINR(d.profitForPeriod)}</Td></tr>
-                <tr className="font-medium"><Td>Total equity</Td><Td className={amt}>{formatINR(d.totalEquity)}</Td></tr>
-                <Sections sections={d.liabilities} emptyLabel="No liabilities" />
-                <tr className="font-medium"><Td>Total liabilities</Td><Td className={amt}>{formatINR(d.totalLiabilities)}</Td></tr>
-                <tr className="bg-mint font-semibold text-primary"><Td>Total equity and liabilities</Td><Td className={amt}>{formatINR(d.totalLiabilitiesAndEquity)}</Td></tr>
+                <tr className="bg-page"><Td className="font-semibold" colSpan={c ? 3 : 2}>Equity and liabilities</Td></tr>
+                <Sections sections={d.equity} emptyLabel="No equity balances" compare={c} />
+                <Row label="Profit / (loss) for the period" value={d.profitForPeriod} previous={d.previousProfitForPeriod} compare={c} labelClass="pl-8" />
+                <Row label="Total equity (including profit for the period)" value={d.totalEquity} previous={d.previousTotalEquity} compare={c} className="font-medium" />
+                <Sections sections={d.liabilities} emptyLabel="No liabilities" compare={c} />
+                <Row label="Total liabilities" value={d.totalLiabilities} previous={d.previousTotalLiabilities} compare={c} className="font-medium" />
+                <Row label="Total equity and liabilities" value={d.totalLiabilitiesAndEquity} previous={d.previousTotalLiabilitiesAndEquity} compare={c}
+                  className="bg-mint font-semibold text-primary" />
               </tbody>
             </Table>
             <Table>
+              {heads}
               <tbody>
-                <tr className="bg-page"><Td className="font-semibold">Assets</Td><Td /></tr>
-                <Sections sections={d.assets} emptyLabel="No assets" />
-                <tr className="bg-mint font-semibold text-primary"><Td>Total assets</Td><Td className={amt}>{formatINR(d.totalAssets)}</Td></tr>
+                <tr className="bg-page"><Td className="font-semibold" colSpan={c ? 3 : 2}>Assets</Td></tr>
+                <Sections sections={d.assets} emptyLabel="No assets" compare={c} />
+                <Row label="Total assets" value={d.totalAssets} previous={d.previousTotalAssets} compare={c} className="bg-mint font-semibold text-primary" />
               </tbody>
             </Table>
           </div>
@@ -219,6 +292,7 @@ export function LedgerTab({ clientId }: { clientId: string }) {
   const d = q.data;
   return (
     <ReportFrame header={d?.header} title={d ? `General ledger · ${d.code} ${d.name}` : "General ledger"}
+      exportSpec={{ report: "LEDGER", params: { accountId, from: r.from, to: r.to } }}
       controls={<>
         <Field label="Account" htmlFor="gl-account">
           <Select id="gl-account" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="min-w-72">

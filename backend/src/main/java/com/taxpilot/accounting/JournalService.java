@@ -111,8 +111,8 @@ public class JournalService {
         }
         requireActiveClient(req.clientId());
         JournalEntry.Type type = req.entryType() == null ? JournalEntry.Type.GENERAL : req.entryType();
-        if (type == JournalEntry.Type.REVERSAL) {
-            throw ApiException.field("entryType", "Reversal entries are created with the Reverse action");
+        if (type == JournalEntry.Type.REVERSAL || type == JournalEntry.Type.CLOSING) {
+            throw ApiException.field("entryType", "Reversal and year-end closing entries are created by their own actions");
         }
         JournalEntry entry = new JournalEntry(req.clientId(), me.id(), type, null, key);
         apply(entry, req);
@@ -128,8 +128,11 @@ public class JournalService {
             throw ApiException.notFound("Journal entry");
         }
         requireStatus(entry, JournalEntry.Status.DRAFT, "Only draft journals can be edited");
-        if (entry.getEntryType() == JournalEntry.Type.REVERSAL) {
-            throw ApiException.conflict("REVERSAL_LOCKED", "Reversal entries mirror the original and cannot be edited");
+        if (entry.getEntryType() == JournalEntry.Type.REVERSAL || entry.getEntryType() == JournalEntry.Type.CLOSING) {
+            throw ApiException.conflict("SYSTEM_ENTRY_LOCKED", "Reversal and closing entries are generated and cannot be edited");
+        }
+        if (req.entryType() == JournalEntry.Type.REVERSAL || req.entryType() == JournalEntry.Type.CLOSING) {
+            throw ApiException.field("entryType", "This entry type cannot be chosen manually");
         }
         if (req.version() == null || req.version() != entry.getVersion()) {
             throw ApiException.conflict("STALE_VERSION", "This journal was changed by someone else. Reload and try again.");
@@ -211,8 +214,19 @@ public class JournalService {
                 throw ApiException.conflict("ACCOUNT_UNAVAILABLE", "Account " + a.getCode() + " is inactive or a group");
             }
         }
+        boolean closing = entry.getEntryType() == JournalEntry.Type.CLOSING;
+        if (closing && !sameLines(entry.getLines(), closingLines(entry.getClientId(), entry.getClosingFinancialYear()))) {
+            throw ApiException.conflict("STALE_CLOSING", "Income or expense balances changed after this closing entry was "
+                    + "prepared. Cancel it and prepare the year-end close again.");
+        }
         entry.post(me.id(), nextNumber(entry.getClientId(), period.getFinancialYear()));
         journals.saveAndFlush(entry);
+        if (closing) {
+            int closed = periods.closeYear(entry.getClientId(), entry.getClosingFinancialYear(), me.id());
+            audit.record("FINANCIAL_YEAR_CLOSED", "CLIENT", entry.getClientId(), entry.getClientId(),
+                    Map.of("financialYear", entry.getClosingFinancialYear(), "periodsClosed", closed,
+                            "closingEntry", entry.getEntryNumber()));
+        }
         if (entry.getReversalOfId() != null) {
             JournalEntry original = find(entry.getReversalOfId());
             original.markReversedBy(entry.getId());
@@ -242,8 +256,8 @@ public class JournalService {
         CurrentUser me = CurrentUser.require();
         JournalEntry original = find(id);
         requireStatus(original, JournalEntry.Status.POSTED, "Only posted journals can be reversed");
-        if (original.getEntryType() == JournalEntry.Type.REVERSAL) {
-            throw ApiException.conflict("CANNOT_REVERSE_REVERSAL", "A reversal entry cannot itself be reversed");
+        if (original.getEntryType() == JournalEntry.Type.REVERSAL || original.getEntryType() == JournalEntry.Type.CLOSING) {
+            throw ApiException.conflict("CANNOT_REVERSE", "Reversal and year-end closing entries cannot be reversed");
         }
         if (original.getReversedById() != null
                 || journals.existsByReversalOfIdAndStatusNot(id, JournalEntry.Status.CANCELLED)) {
@@ -263,7 +277,7 @@ public class JournalService {
         rev.setReference(original.getEntryNumber());
         List<JournalEntry.Line> lines = new ArrayList<>();
         for (JournalEntry.Line l : original.getLines()) {
-            lines.add(new JournalEntry.Line(l.getAccountId(), l.getCredit(), l.getDebit(), l.getDescription()));
+            lines.add(new JournalEntry.Line(l.getAccountId(), l.getCredit(), l.getDebit(), l.getDescription(), l.getPartyId()));
         }
         rev.replaceLines(lines);
         journals.save(rev);
@@ -272,6 +286,100 @@ public class JournalService {
         d.put("reason", reason.trim());
         audit.record("JOURNAL_REVERSAL_CREATED", "JOURNAL_ENTRY", rev.getId(), rev.getClientId(), d);
         return toDetail(rev);
+    }
+
+    // ---------------------------------------------------------------- year-end close
+
+    /**
+     * Prepares the year-end closing entry for a financial year as a DRAFT: every income and expense ledger's balance
+     * for the year is reversed and the net result goes to retained earnings. It then follows the normal approval path;
+     * posting it closes all periods of the year.
+     */
+    @Transactional
+    public JournalDetailDto prepareYearEnd(UUID clientId, String financialYear) {
+        CurrentUser me = CurrentUser.require();
+        requireActiveClient(clientId);
+        List<AccountingPeriod> year = periods.yearPeriods(clientId, financialYear);
+        if (year.isEmpty()) throw ApiException.field("financialYear", "Financial year " + financialYear + " is not open");
+        if (jdbc.queryForObject("""
+                select count(*) from journal_entries where client_id = ? and closing_financial_year = ? and status <> 'CANCELLED'
+                """, Integer.class, clientId, financialYear) > 0) {
+            throw ApiException.conflict("ALREADY_CLOSING", "A closing entry for " + financialYear + " already exists");
+        }
+        LocalDate start = year.getFirst().getStartDate();
+        LocalDate end = year.getLast().getEndDate();
+        Integer unposted = jdbc.queryForObject("""
+                select count(*) from journal_entries where client_id = ? and entry_date between ? and ?
+                and status in ('PENDING_APPROVAL','APPROVED')
+                """, Integer.class, clientId, start, end);
+        if (unposted > 0) {
+            throw ApiException.conflict("UNPOSTED_JOURNALS", unposted + " journal(s) in " + financialYear
+                    + " await approval or posting. Resolve them before closing the year.");
+        }
+        AccountingPeriod last = year.getLast();
+        if (last.getStatus() != AccountingPeriod.Status.OPEN) {
+            throw ApiException.conflict("PERIOD_CLOSED", "Reopen the last period of the year (" + last.getStartDate().getMonth()
+                    + ") so the closing entry can be dated on " + end);
+        }
+        List<JournalEntry.Line> lines = closingLines(clientId, financialYear);
+        if (lines.size() < 2) {
+            throw ApiException.conflict("NOTHING_TO_CLOSE", "There are no income or expense balances to close for " + financialYear);
+        }
+        JournalEntry entry = new JournalEntry(clientId, me.id(), JournalEntry.Type.CLOSING, null, null);
+        entry.setClosingFinancialYear(financialYear);
+        entry.setEntryDate(end, last.getId());
+        entry.setNarration("Year-end closing " + financialYear + ": transfer of profit or loss to retained earnings");
+        entry.setReference("CLOSE " + financialYear);
+        entry.replaceLines(lines);
+        journals.save(entry);
+        audit.record("YEAR_END_PREPARED", "JOURNAL_ENTRY", entry.getId(), clientId,
+                Map.of("financialYear", financialYear, "lines", lines.size()));
+        return toDetail(entry);
+    }
+
+    /** Lines that zero every P&L ledger for the year (excluding earlier closing entries) against retained earnings. */
+    List<JournalEntry.Line> closingLines(UUID clientId, String financialYear) {
+        List<AccountingPeriod> year = periods.yearPeriods(clientId, financialYear);
+        if (year.isEmpty()) return List.of();
+        LedgerAccount retained = accounts.findByClientIdAndTemplateCode(clientId, "IN-STANDARD:3200")
+                .or(() -> accounts.findByClientIdOrderByCodeAsc(clientId).stream()
+                        .filter(a -> "RETAINED_EARNINGS".equals(a.getSubtype()) && !a.isGroup()).findFirst())
+                .orElseThrow(() -> ApiException.conflict("ACCOUNT_MISSING",
+                        "No retained earnings ledger (subtype RETAINED_EARNINGS) exists for this client"));
+        List<JournalEntry.Line> lines = new ArrayList<>();
+        BigDecimal net = Money.ZERO; // positive = credit balance (profit)
+        for (Map<String, Object> r : jdbc.queryForList("""
+                select a.id, coalesce(sum(l.debit),0) as dr, coalesce(sum(l.credit),0) as cr
+                from ledger_accounts a
+                join journal_entry_lines l on l.account_id = a.id
+                join journal_entries e on e.id = l.journal_entry_id
+                where a.client_id = ? and a.account_type in ('INCOME','EXPENSE') and e.status = 'POSTED'
+                  and e.entry_type <> 'CLOSING' and e.entry_date between ? and ?
+                group by a.id, a.code order by a.code
+                """, clientId, year.getFirst().getStartDate(), year.getLast().getEndDate())) {
+            BigDecimal bal = Money.of((BigDecimal) r.get("dr")).subtract(Money.of((BigDecimal) r.get("cr")));
+            if (bal.signum() == 0) continue;
+            UUID acc = (UUID) r.get("id");
+            lines.add(bal.signum() > 0 ? new JournalEntry.Line(acc, Money.ZERO, bal, "Close to retained earnings")
+                    : new JournalEntry.Line(acc, bal.negate(), Money.ZERO, "Close to retained earnings"));
+            net = net.subtract(bal);
+        }
+        if (net.signum() != 0) {
+            lines.add(net.signum() > 0 ? new JournalEntry.Line(retained.getId(), Money.ZERO, net, "Profit for " + financialYear)
+                    : new JournalEntry.Line(retained.getId(), net.negate(), Money.ZERO, "Loss for " + financialYear));
+        }
+        return lines;
+    }
+
+    private static boolean sameLines(List<JournalEntry.Line> a, List<JournalEntry.Line> b) {
+        Map<String, BigDecimal> x = new HashMap<>();
+        Map<String, BigDecimal> y = new HashMap<>();
+        a.forEach(l -> x.merge(l.getAccountId().toString(), l.getDebit().subtract(l.getCredit()), BigDecimal::add));
+        b.forEach(l -> y.merge(l.getAccountId().toString(), l.getDebit().subtract(l.getCredit()), BigDecimal::add));
+        x.values().removeIf(v -> v.signum() == 0);
+        y.values().removeIf(v -> v.signum() == 0);
+        if (!x.keySet().equals(y.keySet())) return false;
+        return x.entrySet().stream().allMatch(en -> en.getValue().compareTo(y.get(en.getKey())) == 0);
     }
 
     /**
@@ -344,7 +452,19 @@ public class JournalService {
             if (!a.isActive()) {
                 throw ApiException.field(prefix + ".accountId", "Line " + (i + 1) + ": " + a.getCode() + " is inactive");
             }
-            lines.add(new JournalEntry.Line(a.getId(), dr, cr, blank(lr.description())));
+            UUID partyId = lr.partyId();
+            if (partyId != null) {
+                if (!"RECEIVABLE".equals(a.getSubtype()) && !"PAYABLE".equals(a.getSubtype())) {
+                    throw ApiException.field(prefix + ".partyId", "Line " + lineNo
+                            + ": only receivable or payable lines can carry a customer or vendor");
+                }
+                Integer found = jdbc.queryForObject("select count(*) from parties where id = ? and client_id = ?",
+                        Integer.class, partyId, req.clientId());
+                if (found == null || found == 0) {
+                    throw ApiException.field(prefix + ".partyId", "Line " + lineNo + ": customer or vendor not found");
+                }
+            }
+            lines.add(new JournalEntry.Line(a.getId(), dr, cr, blank(lr.description()), partyId));
         }
         entry.setEntryDate(req.entryDate(), period.getId());
         entry.setNarration(req.narration().trim());
@@ -420,8 +540,11 @@ public class JournalService {
         Map<UUID, LedgerAccount> acc = new HashMap<>();
         List<JournalLineDto> lines = e.getLines().stream().map(l -> {
             LedgerAccount a = acc.computeIfAbsent(l.getAccountId(), k -> accounts.findById(k).orElse(null));
+            String partyName = l.getPartyId() == null ? null : jdbc.queryForList(
+                    "select name from parties where id = ?", String.class, l.getPartyId()).stream().findFirst().orElse(null);
             return new JournalLineDto(l.getId(), l.getLineNo(), l.getAccountId(), a == null ? null : a.getCode(),
-                    a == null ? null : a.getName(), Money.str(l.getDebit()), Money.str(l.getCredit()), l.getDescription());
+                    a == null ? null : a.getName(), Money.str(l.getDebit()), Money.str(l.getCredit()), l.getDescription(),
+                    l.getPartyId(), partyName);
         }).toList();
         AccountingPeriod period = periods.find(e.getPeriodId());
         String reversalOfNumber = e.getReversalOfId() == null ? null
@@ -448,7 +571,9 @@ public class JournalService {
         switch (e.getStatus()) {
             case DRAFT -> {
                 if (me.has(WRITE)) {
-                    if (e.getEntryType() != JournalEntry.Type.REVERSAL) actions.add("EDIT");
+                    if (e.getEntryType() != JournalEntry.Type.REVERSAL && e.getEntryType() != JournalEntry.Type.CLOSING) {
+                        actions.add("EDIT");
+                    }
                     actions.add("SUBMIT");
                     actions.add("CANCEL");
                 }
@@ -468,7 +593,8 @@ public class JournalService {
                 if (me.has(WRITE)) actions.add("CANCEL");
             }
             case POSTED -> {
-                if (me.has(WRITE) && e.getEntryType() != JournalEntry.Type.REVERSAL && e.getReversedById() == null) {
+                if (me.has(WRITE) && e.getEntryType() != JournalEntry.Type.REVERSAL
+                        && e.getEntryType() != JournalEntry.Type.CLOSING && e.getReversedById() == null) {
                     actions.add("REVERSE");
                 }
             }

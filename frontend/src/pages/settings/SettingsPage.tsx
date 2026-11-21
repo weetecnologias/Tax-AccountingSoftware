@@ -15,6 +15,7 @@ import { formatDateTime, humanize } from "@/lib/utils";
 import type { Page, Permission, Role, User } from "@/types/api";
 import { passwordSchema } from "@/validation/ids";
 import { OrganisationTab } from "./OrganisationTab";
+import { TaxRulesTab } from "./TaxRulesTab";
 
 export function SettingsPage() {
   const { can } = useAuth();
@@ -29,9 +30,11 @@ export function SettingsPage() {
           <TabsTrigger value="users">Users</TabsTrigger>
           {can("ROLE_READ") && <TabsTrigger value="roles">Roles &amp; permissions</TabsTrigger>}
           <TabsTrigger value="organisation">Organisation</TabsTrigger>
+          <TabsTrigger value="tax-rules">Tax rules</TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="mt-5"><UsersTab /></TabsContent>
         <TabsContent value="organisation" className="mt-5"><OrganisationTab /></TabsContent>
+        <TabsContent value="tax-rules" className="mt-5"><TaxRulesTab /></TabsContent>
         {can("ROLE_READ") && <TabsContent value="roles" className="mt-5"><RolesTab /></TabsContent>}
       </Tabs>
     </div>

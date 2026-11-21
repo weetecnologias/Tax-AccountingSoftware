@@ -12,6 +12,9 @@ import { formatDate, humanize } from "@/lib/utils";
 import type { Page } from "@/types/api";
 import type { Invoice, InvoiceSeries, InvoiceType } from "@/types/accounting";
 
+const TAB_LABEL: Record<InvoiceType, string> = { SALES: "Sales", PURCHASE: "Purchases", CREDIT_NOTE: "Credit notes", DEBIT_NOTE: "Debit notes" };
+const KIND_LABEL = { INVOICE: "Invoices", CREDIT_NOTE: "Credit notes", DEBIT_NOTE: "Debit notes" } as const;
+
 export function InvoicesTab({ clientId, active }: { clientId: string; active: boolean }) {
   const { can } = useAuth();
   const navigate = useNavigate();
@@ -30,10 +33,10 @@ export function InvoicesTab({ clientId, active }: { clientId: string; active: bo
     <Card>
       <div className="flex flex-wrap items-center gap-3 border-b border-line p-4">
         <div className="flex rounded-md border border-line p-0.5" role="tablist" aria-label="Invoice type">
-          {(["SALES", "PURCHASE"] as const).map((t) => (
+          {(["SALES", "PURCHASE", "CREDIT_NOTE", "DEBIT_NOTE"] as const).map((t) => (
             <button key={t} type="button" role="tab" aria-selected={type === t} onClick={() => { setType(t); setPage(0); }}
               className={`cursor-pointer rounded px-3 py-1.5 text-sm ${type === t ? "bg-primary text-white" : "text-muted hover:text-ink"}`}>
-              {t === "SALES" ? "Sales" : "Purchases"}
+              {TAB_LABEL[t]}
             </button>
           ))}
         </div>
@@ -45,8 +48,8 @@ export function InvoicesTab({ clientId, active }: { clientId: string; active: bo
           <option value="">All statuses</option>
           {["DRAFT", "PENDING_APPROVAL", "POSTED", "CANCELLED"].map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
         </Select>
-        {type === "SALES" && <Button variant="secondary" size="sm" onClick={() => setSeriesOpen(true)}><Settings2 className="h-4 w-4" /> Numbering</Button>}
-        {can("ACCOUNTING_WRITE") && (
+        {type !== "PURCHASE" && <Button variant="secondary" size="sm" onClick={() => setSeriesOpen(true)}><Settings2 className="h-4 w-4" /> Numbering</Button>}
+        {can("ACCOUNTING_WRITE") && (type === "SALES" || type === "PURCHASE") && (
           <Button onClick={() => navigate(`/accounting/invoices/new?clientId=${clientId}&type=${type}`)} disabled={!active}>
             <Plus className="h-4 w-4" /> New {type === "SALES" ? "sales" : "purchase"} invoice
           </Button>
@@ -55,13 +58,14 @@ export function InvoicesTab({ clientId, active }: { clientId: string; active: bo
       {list.isError ? <ErrorState error={list.error} onRetry={() => list.refetch()} /> : (
         <>
           <Table>
-            <thead><tr><Th>Number</Th><Th>Date</Th><Th>{type === "SALES" ? "Customer" : "Vendor"}</Th><Th>Supply</Th><Th className="text-right">Taxable</Th><Th className="text-right">GST</Th><Th className="text-right">Total</Th><Th>Status</Th></tr></thead>
+            <thead><tr><Th>Number</Th><Th>Date</Th><Th>{type === "SALES" || type === "CREDIT_NOTE" ? "Customer" : "Vendor"}</Th><Th>Supply</Th><Th className="text-right">Taxable</Th><Th className="text-right">GST</Th><Th className="text-right">Total</Th><Th>Status</Th></tr></thead>
             <tbody>
               {list.isPending ? <LoadingRows cols={8} /> : list.data?.items.map((i) => {
                 const gst = paiseToString((toPaise(i.cgstTotal) ?? 0n) + (toPaise(i.sgstTotal) ?? 0n) + (toPaise(i.igstTotal) ?? 0n));
                 return (
                   <tr key={i.id} className="cursor-pointer hover:bg-mint/40" onClick={() => navigate(`/accounting/invoices/${i.id}`)}>
-                    <Td className="font-mono text-xs">{(type === "SALES" ? i.invoiceNumber : i.supplierInvoiceNumber) ?? <span className="text-muted">Draft</span>}</Td>
+                    <Td className="font-mono text-xs">{(type !== "PURCHASE" ? i.invoiceNumber : i.supplierInvoiceNumber) ?? <span className="text-muted">Draft</span>}
+                      {i.originalNumber && <span className="block text-muted">against {i.originalNumber}</span>}</Td>
                     <Td className="whitespace-nowrap">{formatDate(i.invoiceDate)}</Td>
                     <Td>{i.partyName}{i.reverseCharge && <span className="ml-1 text-xs text-warning">RCM</span>}</Td>
                     <Td className="text-xs">{i.supplyType === "INTRA" ? "Intra-state" : "Inter-state"}</Td>
@@ -74,7 +78,8 @@ export function InvoicesTab({ clientId, active }: { clientId: string; active: bo
               })}
             </tbody>
           </Table>
-          {list.data?.items.length === 0 && <EmptyState title={`No ${type === "SALES" ? "sales" : "purchase"} invoices`} />}
+          {list.data?.items.length === 0 && <EmptyState title={`No ${TAB_LABEL[type].toLowerCase()}`}
+            description={type === "CREDIT_NOTE" ? "Raise a credit note from a posted sales invoice." : type === "DEBIT_NOTE" ? "Raise a debit note from a posted purchase invoice." : undefined} />}
           {list.data && <Pagination page={list.data.page} totalPages={list.data.totalPages} totalItems={list.data.totalItems} onPage={setPage} />}
         </>
       )}
@@ -96,13 +101,13 @@ function SeriesDialog({ clientId, onClose }: { clientId: string; onClose: () => 
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title="Sales invoice numbering"
-      description="Format PREFIX/YY-YY/00001, one series per GSTIN, restarting each financial year. GST rules allow at most 16 characters, so the prefix is limited to 4."
+    <Dialog open onOpenChange={(o) => !o && onClose()} title="Document numbering"
+      description="Format PREFIX/YY-YY/00001, one series per GSTIN and document type, restarting each financial year. GST rules allow at most 16 characters, so the prefix is limited to 4."
       footer={<><Button variant="secondary" onClick={onClose}>Close</Button>{can("ACCOUNTING_APPROVE") && <Button loading={save.isPending} disabled={Object.keys(edits).length === 0} onClick={() => save.mutate()}>Save</Button>}</>}>
       <div className="space-y-3">
         {series.data?.map((s) => (
           <div key={s.id} className="flex items-end gap-3">
-            <Field label={s.gstin ? `GSTIN ${s.gstin}` : "No GST registration"} htmlFor={`s-${s.id}`} className="w-32">
+            <Field label={`${KIND_LABEL[s.kind]} · ${s.gstin ?? "no GSTIN"}`} htmlFor={`s-${s.id}`} className="w-56">
               <Input id={`s-${s.id}`} maxLength={4} className="font-mono uppercase" disabled={!can("ACCOUNTING_APPROVE")}
                 value={edits[s.id] ?? s.prefix} onChange={(e) => setEdits({ ...edits, [s.id]: e.target.value.toUpperCase() })} />
             </Field>

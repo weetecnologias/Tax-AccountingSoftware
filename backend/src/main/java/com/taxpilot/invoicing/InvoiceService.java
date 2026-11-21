@@ -66,7 +66,8 @@ public class InvoiceService {
                                  @NotNull LocalDate invoiceDate, LocalDate dueDate, @NotNull UUID partyId,
                                  UUID gstRegistrationId, String placeOfSupply, Boolean reverseCharge,
                                  @Size(max = 16) String supplierInvoiceNumber, @Size(max = 1000) String notes,
-                                 @NotEmpty @Size(max = 200) List<@Valid LineRequest> lines, Long version) {
+                                 @NotEmpty @Size(max = 200) List<@Valid LineRequest> lines, Long version,
+                                 UUID originalInvoiceId, @Size(max = 300) String noteReason) {
     }
 
     public record LineDto(UUID id, int lineNo, String description, String hsnSac, UUID accountId, String accountCode,
@@ -83,10 +84,12 @@ public class InvoiceService {
                              UUID journalEntryId, String journalNumber, UserRef preparedBy, UserRef submittedBy,
                              Instant submittedAt, UserRef approvedBy, Instant approvedAt, boolean selfApproved,
                              String rejectionReason, List<LineDto> lines, List<String> allowedActions,
-                             Instant createdAt, long version) {
+                             Instant createdAt, long version, UUID originalInvoiceId, String originalNumber,
+                             String noteReason, String notesPostedTotal, String noteableBalance) {
     }
 
-    public record SeriesDto(UUID id, UUID gstRegistrationId, String gstin, String prefix, String nextNumberPreview) {
+    public record SeriesDto(UUID id, String kind, UUID gstRegistrationId, String gstin, String prefix,
+                            String nextNumberPreview) {
     }
 
     public record RateDto(String rate, String description, String reviewStatus) {
@@ -162,12 +165,12 @@ public class InvoiceService {
     public List<SeriesDto> series(UUID clientId) {
         clients.find(clientId);
         List<SeriesDto> out = new ArrayList<>();
-        for (ClientRecords.GstRegistration g : gstRegs.findByClientIdOrderByCreatedAtAsc(clientId)) {
-            UUID sid = ensureSeries(clientId, g.getId());
-            out.add(seriesDto(sid, g.getId(), g.getGstin()));
-        }
-        if (out.isEmpty()) {
-            out.add(seriesDto(ensureSeries(clientId, null), null, null));
+        List<ClientRecords.GstRegistration> regList = gstRegs.findByClientIdOrderByCreatedAtAsc(clientId);
+        for (String kind : List.of("INVOICE", "CREDIT_NOTE", "DEBIT_NOTE")) {
+            for (ClientRecords.GstRegistration g : regList) {
+                out.add(seriesDto(ensureSeries(clientId, g.getId(), kind), g.getId(), g.getGstin()));
+            }
+            if (regList.isEmpty()) out.add(seriesDto(ensureSeries(clientId, null, kind), null, null));
         }
         return out;
     }
@@ -283,14 +286,36 @@ public class InvoiceService {
         requireActiveClient(inv.getClientId());
         AccountingPeriod period = requireOpenPeriod(inv);
         Party party = parties.findById(inv.getPartyId()).orElseThrow();
-        String number = inv.getInvoiceType() == Invoice.Type.SALES
-                ? nextInvoiceNumber(inv.getClientId(), inv.getGstRegistrationId(), period.getFinancialYear()) : null;
+        Invoice original = null;
+        if (inv.getInvoiceType().isNote()) {
+            original = find(inv.getOriginalInvoiceId());
+            BigDecimal balance = noteableBalance(original, inv.getId());
+            if (inv.getGrandTotal().compareTo(balance) > 0) {
+                throw ApiException.conflict("NOTE_EXCEEDS_INVOICE", "This note (₹" + Money.str(inv.getGrandTotal())
+                        + ") exceeds the remaining value of the original invoice (₹" + Money.str(balance) + ")");
+            }
+        }
+        String kind = switch (inv.getInvoiceType()) {
+            case SALES -> "INVOICE";
+            case CREDIT_NOTE -> "CREDIT_NOTE";
+            case DEBIT_NOTE -> "DEBIT_NOTE";
+            case PURCHASE -> null;
+        };
+        String number = kind == null ? null
+                : nextInvoiceNumber(inv.getClientId(), inv.getGstRegistrationId(), period.getFinancialYear(), kind);
         String docRef = number != null ? number : inv.getSupplierInvoiceNumber();
-        String narration = (inv.getInvoiceType() == Invoice.Type.SALES ? "Sales invoice " + number + " to "
-                : "Purchase invoice " + inv.getSupplierInvoiceNumber() + " from ") + party.getName()
-                + (inv.isReverseCharge() ? " (reverse charge)" : "");
+        String originalRef = original == null ? null
+                : (original.getInvoiceNumber() != null ? original.getInvoiceNumber() : original.getSupplierInvoiceNumber());
+        String narration = switch (inv.getInvoiceType()) {
+            case SALES -> "Sales invoice " + number + " to " + party.getName();
+            case PURCHASE -> "Purchase invoice " + inv.getSupplierInvoiceNumber() + " from " + party.getName();
+            case CREDIT_NOTE -> "Credit note " + number + " to " + party.getName() + " against " + originalRef
+                    + (inv.getNoteReason() != null ? " (" + inv.getNoteReason() + ")" : "");
+            case DEBIT_NOTE -> "Debit note " + number + " to " + party.getName() + " against " + originalRef
+                    + (inv.getNoteReason() != null ? " (" + inv.getNoteReason() + ")" : "");
+        } + (inv.isReverseCharge() ? " (reverse charge)" : "");
         JournalEntry journal = journals.createPosted(inv.getClientId(), inv.getInvoiceDate(), narration, docRef,
-                postingLines(inv, party), inv.getPreparedBy(), inv.getSubmittedBy(), me.id(), "INVOICE");
+                postingLines(inv, party, docRef), inv.getPreparedBy(), inv.getSubmittedBy(), me.id(), "INVOICE");
         inv.post(me.id(), self, number, journal.getId());
         invoices.saveAndFlush(inv);
         Map<String, Object> d = summary(inv);
@@ -308,18 +333,29 @@ public class InvoiceService {
      *           Cr Payable (party). Reverse charge: tax credited to "GST payable under RCM" instead of the vendor.
      *           Without a GST registration of our own, tax is added to the cost (no ITC).
      */
-    List<JournalEntry.Line> postingLines(Invoice inv, Party party) {
+    List<JournalEntry.Line> postingLines(Invoice inv, Party party, String docRef) {
+        List<JournalEntry.Line> base = baseLines(inv, party, docRef);
+        if (!inv.getInvoiceType().isNote()) return base;
+        // A credit/debit note is the mirror image of the document type it adjusts.
+        List<JournalEntry.Line> mirrored = new ArrayList<>();
+        for (JournalEntry.Line l : base) {
+            mirrored.add(new JournalEntry.Line(l.getAccountId(), l.getCredit(), l.getDebit(), l.getDescription(), l.getPartyId()));
+        }
+        return mirrored;
+    }
+
+    private List<JournalEntry.Line> baseLines(Invoice inv, Party party, String docRef) {
         UUID clientId = inv.getClientId();
         List<JournalEntry.Line> lines = new ArrayList<>();
         Map<UUID, BigDecimal> byAccount = new LinkedHashMap<>();
-        boolean sales = inv.getInvoiceType() == Invoice.Type.SALES;
+        boolean sales = inv.getInvoiceType().salesSide();
         boolean itc = !sales && inv.getGstRegistrationId() != null;
         for (Invoice.Line l : inv.getLines()) {
             BigDecimal amount = l.getTaxableValue();
             if (!sales && !itc) amount = amount.add(l.getCgst()).add(l.getSgst()).add(l.getIgst());
             byAccount.merge(l.getAccountId(), amount, BigDecimal::add);
         }
-        String desc = sales ? inv.getInvoiceNumber() : inv.getSupplierInvoiceNumber();
+        String desc = docRef;
         if (sales) {
             lines.add(new JournalEntry.Line(account(clientId, "1130", "Trade Receivables"), inv.getGrandTotal(), Money.ZERO, desc, party.getId()));
             byAccount.forEach((acc, amt) -> lines.add(new JournalEntry.Line(acc, Money.ZERO, amt, desc)));
@@ -362,11 +398,28 @@ public class InvoiceService {
     // ---------------------------------------------------------------- validation & mapping
 
     private void apply(Invoice inv, InvoiceRequest r) {
-        Party party = parties.findById(r.partyId()).filter(p -> p.getClientId().equals(r.clientId()))
+        boolean note = r.invoiceType().isNote();
+        Invoice original = null;
+        if (note) {
+            if (r.originalInvoiceId() == null) throw ApiException.field("originalInvoiceId", "Choose the invoice this note adjusts");
+            original = invoices.findById(r.originalInvoiceId()).filter(o -> o.getClientId().equals(r.clientId()))
+                    .orElseThrow(() -> ApiException.field("originalInvoiceId", "Original invoice not found"));
+            Invoice.Type expected = r.invoiceType() == Invoice.Type.CREDIT_NOTE ? Invoice.Type.SALES : Invoice.Type.PURCHASE;
+            if (original.getInvoiceType() != expected || original.getStatus() != Invoice.Status.POSTED) {
+                throw ApiException.field("originalInvoiceId", r.invoiceType() == Invoice.Type.CREDIT_NOTE
+                        ? "A credit note must adjust a posted sales invoice" : "A debit note must adjust a posted purchase invoice");
+            }
+            if (r.invoiceDate().isBefore(original.getInvoiceDate())) {
+                throw ApiException.field("invoiceDate", "A note cannot be dated before the original invoice");
+            }
+            if (blank(r.noteReason()) == null) throw ApiException.field("noteReason", "Give the reason for the note (e.g. goods returned, rate difference)");
+        }
+        UUID partyId = note ? original.getPartyId() : r.partyId();
+        Party party = parties.findById(partyId).filter(p -> p.getClientId().equals(r.clientId()))
                 .orElseThrow(() -> ApiException.field("partyId", "Customer or vendor not found"));
-        boolean sales = r.invoiceType() == Invoice.Type.SALES;
-        if (sales && !party.isCustomer()) throw ApiException.field("partyId", "Choose a customer for a sales invoice");
-        if (!sales && !party.isVendor()) throw ApiException.field("partyId", "Choose a vendor for a purchase invoice");
+        boolean sales = r.invoiceType().salesSide();
+        if (!note && sales && !party.isCustomer()) throw ApiException.field("partyId", "Choose a customer for a sales invoice");
+        if (!note && !sales && !party.isVendor()) throw ApiException.field("partyId", "Choose a vendor for a purchase invoice");
         if (!party.isActive()) throw ApiException.field("partyId", "This party is inactive");
 
         AccountingPeriod period = periods.periodFor(r.clientId(), r.invoiceDate(), "invoiceDate");
@@ -375,15 +428,18 @@ public class InvoiceService {
         }
 
         ClientRecords.GstRegistration reg = null;
-        if (r.gstRegistrationId() != null) {
-            reg = gstRegs.findById(r.gstRegistrationId()).filter(g -> g.getClientId().equals(r.clientId()))
+        UUID regId = note ? original.getGstRegistrationId() : r.gstRegistrationId();
+        if (note && regId != null) {
+            reg = gstRegs.findById(regId).orElseThrow();
+        } else if (regId != null) {
+            reg = gstRegs.findById(regId).filter(g -> g.getClientId().equals(r.clientId()))
                     .orElseThrow(() -> ApiException.field("gstRegistrationId", "GST registration not found"));
             if (!"ACTIVE".equals(reg.getStatus())) throw ApiException.field("gstRegistrationId", "This GST registration is not active");
-        } else if (sales && gstRegs.countActive(r.clientId()) > 0) {
+        } else if (!note && sales && gstRegs.countActive(r.clientId()) > 0) {
             throw ApiException.field("gstRegistrationId", "Choose the GSTIN this invoice is issued from");
         }
 
-        String pos = blank(r.placeOfSupply());
+        String pos = note ? original.getPlaceOfSupply() : blank(r.placeOfSupply());
         if (pos == null) pos = sales ? party.getStateCode() : (reg != null ? reg.getStateCode() : party.getStateCode());
         if (pos == null || !IndianStates.isValid(pos)) {
             throw ApiException.field("placeOfSupply", "Choose the place of supply (state)");
@@ -391,18 +447,20 @@ public class InvoiceService {
         // Intra-state when supplier location and place of supply are in the same state, otherwise inter-state.
         String ourState = reg != null ? reg.getStateCode() : null;
         Invoice.SupplyType supply;
-        if (sales) {
+        if (note) {
+            supply = original.getSupplyType();
+        } else if (sales) {
             supply = ourState == null || ourState.equals(pos) ? Invoice.SupplyType.INTRA : Invoice.SupplyType.INTER;
         } else {
             String supplierState = party.getStateCode() != null ? party.getStateCode() : pos;
             supply = supplierState.equals(pos) ? Invoice.SupplyType.INTRA : Invoice.SupplyType.INTER;
         }
 
-        boolean rcm = Boolean.TRUE.equals(r.reverseCharge());
+        boolean rcm = note ? original.isReverseCharge() : Boolean.TRUE.equals(r.reverseCharge());
         if (rcm && sales) throw ApiException.field("reverseCharge", "Reverse charge applies to purchase invoices here");
 
-        String supplierNo = blank(r.supplierInvoiceNumber());
-        if (!sales) {
+        String supplierNo = note ? null : blank(r.supplierInvoiceNumber());
+        if (!sales && !note) {
             if (supplierNo == null) throw ApiException.field("supplierInvoiceNumber", "Enter the supplier's invoice number");
             if (!supplierNo.matches("^[A-Za-z0-9/-]{1,16}$")) {
                 throw ApiException.field("supplierInvoiceNumber", "Up to 16 letters, digits, '-' or '/'");
@@ -453,13 +511,28 @@ public class InvoiceService {
 
         LocalDate due = r.dueDate() != null ? r.dueDate() : r.invoiceDate().plusDays(party.getCreditDays());
         if (due.isBefore(r.invoiceDate())) throw ApiException.field("dueDate", "Due date cannot be before the invoice date");
+        if (note && totals.grand().compareTo(noteableBalance(original, inv.getId())) > 0) {
+            throw ApiException.field("lines", "The note total exceeds the remaining value of invoice "
+                    + (original.getInvoiceNumber() != null ? original.getInvoiceNumber() : original.getSupplierInvoiceNumber())
+                    + " (₹" + Money.str(noteableBalance(original, inv.getId())) + ")");
+        }
         inv.setHeader(r.invoiceDate(), due, party.getId(), reg == null ? null : reg.getId(), pos, supply, rcm,
-                sales ? null : supplierNo, blank(r.notes()));
+                sales || note ? null : supplierNo, blank(r.notes()));
+        if (note) inv.setNote(original.getId(), blank(r.noteReason()));
         inv.replaceLines(lines, totals);
     }
 
-    private String nextInvoiceNumber(UUID clientId, UUID regId, String financialYear) {
-        UUID seriesId = ensureSeries(clientId, regId);
+    /** Original grand total less posted (and pending) notes against it, excluding the note being edited. */
+    BigDecimal noteableBalance(Invoice original, UUID excludeNoteId) {
+        BigDecimal used = jdbc.queryForObject("""
+                select coalesce(sum(grand_total), 0) from invoices
+                where original_invoice_id = ? and status in ('POSTED','PENDING_APPROVAL') and id <> ?
+                """, BigDecimal.class, original.getId(), excludeNoteId);
+        return original.getGrandTotal().subtract(Money.of(used));
+    }
+
+    private String nextInvoiceNumber(UUID clientId, UUID regId, String financialYear, String kind) {
+        UUID seriesId = ensureSeries(clientId, regId, kind);
         String prefix = jdbc.queryForObject("select prefix from invoice_series where id = ?", String.class, seriesId);
         jdbc.update("""
                 insert into invoice_sequences (series_id, financial_year, next_value) values (?, ?, 1)
@@ -472,26 +545,29 @@ public class InvoiceService {
         return InvoiceCalculator.formatNumber(prefix, financialYear, n);
     }
 
-    private UUID ensureSeries(UUID clientId, UUID regId) {
-        List<UUID> ids = jdbc.queryForList("""
-                select id from invoice_series where client_id = ? and gst_registration_id is not distinct from ?
-                """, UUID.class, clientId, regId);
+    private UUID ensureSeries(UUID clientId, UUID regId, String kind) {
+        String sql = "select id from invoice_series where client_id = ? and gst_registration_id is not distinct from ? and kind = ?";
+        List<UUID> ids = jdbc.queryForList(sql, UUID.class, clientId, regId, kind);
         if (!ids.isEmpty()) return ids.getFirst();
-        UUID id = UUID.randomUUID();
-        jdbc.update("insert into invoice_series (id, client_id, gst_registration_id, prefix) values (?, ?, ?, 'INV') on conflict do nothing",
-                id, clientId, regId);
-        return jdbc.queryForObject("select id from invoice_series where client_id = ? and gst_registration_id is not distinct from ?",
-                UUID.class, clientId, regId);
+        String prefix = switch (kind) {
+            case "CREDIT_NOTE" -> "CN";
+            case "DEBIT_NOTE" -> "DN";
+            default -> "INV";
+        };
+        jdbc.update("insert into invoice_series (id, client_id, gst_registration_id, prefix, kind) values (?, ?, ?, ?, ?) "
+                + "on conflict do nothing", UUID.randomUUID(), clientId, regId, prefix, kind);
+        return jdbc.queryForObject(sql, UUID.class, clientId, regId, kind);
     }
 
     private SeriesDto seriesDto(UUID seriesId, UUID regId, String gstin) {
         String prefix = jdbc.queryForObject("select prefix from invoice_series where id = ?", String.class, seriesId);
+        String kind = jdbc.queryForObject("select kind from invoice_series where id = ?", String.class, seriesId);
         LocalDate today = LocalDate.now();
         int startYear = today.getMonthValue() >= 4 ? today.getYear() : today.getYear() - 1;
         String fy = startYear + "-" + String.format("%02d", (startYear + 1) % 100);
         List<Integer> next = jdbc.queryForList("select next_value from invoice_sequences where series_id = ? and financial_year = ?",
                 Integer.class, seriesId, fy);
-        return new SeriesDto(seriesId, regId, gstin, prefix,
+        return new SeriesDto(seriesId, kind, regId, gstin, prefix,
                 InvoiceCalculator.formatNumber(prefix, fy, next.isEmpty() ? 1 : next.getFirst()));
     }
 
@@ -552,6 +628,13 @@ public class InvoiceService {
         String journalNumber = i.getJournalEntryId() == null ? null : jdbc.queryForList(
                 "select entry_number from journal_entries where id = ?", String.class, i.getJournalEntryId())
                 .stream().findFirst().orElse(null);
+        String originalNumber = i.getOriginalInvoiceId() == null ? null : invoices.findById(i.getOriginalInvoiceId())
+                .map(o -> o.getInvoiceNumber() != null ? o.getInvoiceNumber() : o.getSupplierInvoiceNumber()).orElse(null);
+        BigDecimal notesPosted = i.getInvoiceType().isNote() ? Money.ZERO : Money.of(jdbc.queryForObject(
+                "select coalesce(sum(grand_total), 0) from invoices where original_invoice_id = ? and status = 'POSTED'",
+                BigDecimal.class, i.getId()));
+        BigDecimal noteable = i.getInvoiceType().isNote() || i.getStatus() != Invoice.Status.POSTED ? Money.ZERO
+                : noteableBalance(i, i.getId());
         return new InvoiceDto(i.getId(), i.getClientId(), i.getInvoiceType(), i.getStatus(), i.getInvoiceNumber(),
                 i.getSupplierInvoiceNumber(), i.getInvoiceDate(), i.getDueDate(), i.getPartyId(),
                 party == null ? null : party.getName(), party == null ? null : party.getGstin(),
@@ -560,10 +643,11 @@ public class InvoiceService {
                 Money.str(i.getSgstTotal()), Money.str(i.getIgstTotal()), Money.str(i.getGrandTotal()), i.getNotes(),
                 i.getJournalEntryId(), journalNumber, ref(i.getPreparedBy(), cache), ref(i.getSubmittedBy(), cache),
                 i.getSubmittedAt(), ref(i.getApprovedBy(), cache), i.getApprovedAt(), i.isSelfApproved(),
-                i.getRejectionReason(), lines, allowedActions(i), i.getCreatedAt(), i.getVersion());
+                i.getRejectionReason(), lines, allowedActions(i, noteable), i.getCreatedAt(), i.getVersion(),
+                i.getOriginalInvoiceId(), originalNumber, i.getNoteReason(), Money.str(notesPosted), Money.str(noteable));
     }
 
-    private List<String> allowedActions(Invoice i) {
+    private List<String> allowedActions(Invoice i, BigDecimal noteable) {
         CurrentUser me = CurrentUser.orNull();
         List<String> a = new ArrayList<>();
         if (me == null) return a;
@@ -577,6 +661,12 @@ public class InvoiceService {
             case PENDING_APPROVAL -> {
                 if (checker) { a.add("APPROVE"); a.add("REJECT"); }
                 if (write) a.add("CANCEL");
+            }
+            case POSTED -> {
+                if (write && noteable.signum() > 0) {
+                    if (i.getInvoiceType() == Invoice.Type.SALES) a.add("CREDIT_NOTE");
+                    if (i.getInvoiceType() == Invoice.Type.PURCHASE) a.add("DEBIT_NOTE");
+                }
             }
             default -> {
             }
